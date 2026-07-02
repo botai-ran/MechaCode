@@ -1,0 +1,19 @@
+{
+  "name": "mecha-agent",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22 <23",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @mecha/desktop tauri dev",
+    "build": "pnpm --filter @mecha/desktop tauri build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
