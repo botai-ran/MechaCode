@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ensureConversation, splitSystemMessage } from "./message-utils.js";
+import { ensureTextConversation, splitSystemMessage } from "./message-utils.js";
 import type {
   ChatInput,
   ChatOutput,
@@ -36,7 +36,7 @@ export class AnthropicProvider implements ModelProvider {
     const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
-      throw new ProviderConfigError("Missing ANTHROPIC_API_KEY.");
+      throw new ProviderConfigError("缺少 ANTHROPIC_API_KEY。");
     }
 
     this.defaultModel =
@@ -124,7 +124,7 @@ export class AnthropicProvider implements ModelProvider {
  * @returns Anthropic 消息数组。
  */
 function toAnthropicMessages(input: ChatInput): Anthropic.MessageParam[] {
-  return ensureConversation(input.messages).map((message) => ({
+  return ensureTextConversation(input.messages).map((message) => ({
     role: message.role,
     content: message.content
   }));

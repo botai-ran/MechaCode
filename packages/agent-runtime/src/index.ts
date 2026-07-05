@@ -9,6 +9,8 @@ export {
   type ChatOutput,
   type ChatRole,
   type ChatStreamEvent,
+  type ChatTool,
+  type ChatToolCall,
   type ModelProvider,
   type ProviderId
 } from "./providers/index.js";

@@ -1,0 +1,45 @@
+.app-shell {
+  height: 100vh;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(248px, 284px) minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--color-page);
+}
+
+.conversation-sidebar {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  border-right: 1px solid var(--color-border-muted);
+  background: var(--color-surface);
+  padding: var(--space-4);
+}
+
+.chat-panel {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 56px minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--color-page);
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .conversation-sidebar {
+    min-height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border-muted);
+    padding: var(--space-3);
+  }
+
+  .chat-panel {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+}

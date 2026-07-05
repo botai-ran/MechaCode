@@ -39,5 +39,26 @@ export function ensureConversation(messages: ChatMessage[]): ChatMessage[] {
   }
 
   /* 大多数模型 API 会拒绝空对话，因此注入一条无副作用的起始 user 消息。 */
-  return [{ role: "user", content: "Hello" }];
+  return [{ role: "user", content: "你好" }];
+}
+
+/**
+ * 确保传给纯文本聊天 API 的消息列表只包含 user/assistant。
+ *
+ * @param messages 标准消息列表。
+ * @returns 至少包含一条 user 消息的纯文本对话列表。
+ */
+export function ensureTextConversation(
+  messages: ChatMessage[]
+): Array<ChatMessage & { role: "user" | "assistant" }> {
+  const conversation = ensureConversation(messages).filter(
+    (message): message is ChatMessage & { role: "user" | "assistant" } =>
+      message.role === "user" || message.role === "assistant"
+  );
+
+  if (conversation.length > 0) {
+    return conversation;
+  }
+
+  return [{ role: "user", content: "你好" }];
 }

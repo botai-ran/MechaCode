@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { ensureConversation, splitSystemMessage } from "./message-utils.js";
+import { ensureTextConversation, splitSystemMessage } from "./message-utils.js";
 import type {
   ChatInput,
   ChatOutput,
@@ -36,7 +36,7 @@ export class OpenAIProvider implements ModelProvider {
     const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
-      throw new ProviderConfigError("Missing OPENAI_API_KEY.");
+      throw new ProviderConfigError("缺少 OPENAI_API_KEY。");
     }
 
     this.defaultModel =
@@ -58,7 +58,7 @@ export class OpenAIProvider implements ModelProvider {
     const response = await this.client.responses.create({
       model,
       instructions: system,
-      input: ensureConversation(input.messages).map((message) => ({
+      input: ensureTextConversation(input.messages).map((message) => ({
         role: message.role,
         content: message.content
       })),
@@ -88,7 +88,7 @@ export class OpenAIProvider implements ModelProvider {
     const stream = await this.client.responses.stream({
       model,
       instructions: system,
-      input: ensureConversation(input.messages).map((message) => ({
+      input: ensureTextConversation(input.messages).map((message) => ({
         role: message.role,
         content: message.content
       })),

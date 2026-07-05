@@ -5,6 +5,8 @@ export type {
   ChatOutput,
   ChatRole,
   ChatStreamEvent,
+  ChatTool,
+  ChatToolCall,
   ModelProvider,
   ProviderId
 } from "./types.js";

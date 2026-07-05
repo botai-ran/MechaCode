@@ -2,7 +2,27 @@
 export type ProviderId = "openai" | "anthropic" | "deepseek";
 
 /** 运行时统一使用的聊天角色。 */
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
+
+/** 暴露给模型的工具定义。 */
+export interface ChatTool {
+  /** 工具名称。 */
+  name: string;
+  /** 工具能力说明。 */
+  description: string;
+  /** 工具输入参数的 JSON Schema。 */
+  inputSchema: Record<string, unknown>;
+}
+
+/** 模型请求执行的工具调用。 */
+export interface ChatToolCall {
+  /** 服务商返回的工具调用 ID。 */
+  id: string;
+  /** 被调用的工具名称。 */
+  name: string;
+  /** 工具输入参数。 */
+  input: unknown;
+}
 
 /** CLI、桌面端和各服务商适配器共享的标准消息结构。 */
 export interface ChatMessage {
@@ -10,6 +30,10 @@ export interface ChatMessage {
   role: ChatRole;
   /** 消息正文内容。 */
   content: string;
+  /** 当角色为 `tool` 时，对应的工具调用 ID。 */
+  toolCallId?: string;
+  /** 当角色为 `assistant` 时，模型返回的工具调用列表。 */
+  toolCalls?: ChatToolCall[];
 }
 
 /** 与具体服务商无关的聊天请求参数。 */
@@ -22,6 +46,8 @@ export interface ChatInput {
   temperature?: number;
   /** 最大输出 token 数。 */
   maxOutputTokens?: number;
+  /** 本轮请求允许模型调用的工具列表。 */
+  tools?: ChatTool[];
 }
 
 /** 每个后端返回的统一聊天结果。 */
@@ -32,6 +58,8 @@ export interface ChatOutput {
   model: string;
   /** 模型生成的完整文本内容。 */
   content: string;
+  /** 模型要求执行的工具调用列表。 */
+  toolCalls?: ChatToolCall[];
 }
 
 /** 流式事件，允许 UI 在最终结果完成前逐步渲染增量文本。 */

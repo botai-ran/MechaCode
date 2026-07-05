@@ -4,6 +4,8 @@ import type {
   ChatOutput,
   ChatStreamEvent,
   ChatMessage,
+  ChatTool,
+  ChatToolCall,
   ModelProvider
 } from "./types.js";
 import { ProviderConfigError } from "./types.js";
@@ -38,7 +40,7 @@ export class DeepSeekProvider implements ModelProvider {
     const apiKey = options.apiKey ?? process.env.DEEPSEEK_API_KEY;
 
     if (!apiKey) {
-      throw new ProviderConfigError("Missing DEEPSEEK_API_KEY.");
+      throw new ProviderConfigError("缺少 DEEPSEEK_API_KEY。");
     }
 
     this.defaultModel =
@@ -67,14 +69,18 @@ export class DeepSeekProvider implements ModelProvider {
     const response = await this.client.chat.completions.create({
       model,
       messages: toDeepSeekMessages(input),
+      tools: toDeepSeekTools(input.tools),
+      tool_choice: input.tools && input.tools.length > 0 ? "auto" : undefined,
       temperature: input.temperature,
       max_tokens: input.maxOutputTokens
     });
+    const message = response.choices[0]?.message;
 
     return {
       provider: this.id,
       model,
-      content: response.choices[0]?.message.content ?? ""
+      content: message?.content ?? "",
+      toolCalls: message?.tool_calls?.map(toChatToolCall)
     };
   }
 
@@ -89,13 +95,9 @@ export class DeepSeekProvider implements ModelProvider {
     const model = input.model ?? this.defaultModel;
     let content = "";
 
-    const messages = toDeepSeekMessages(input);
-
-    console.log('DeepSeek streamChat messages:', messages);
-
     const stream = await this.client.chat.completions.create({
       model,
-      messages,
+      messages: toDeepSeekMessages(input),
       temperature: input.temperature,
       max_tokens: input.maxOutputTokens,
       stream: true
@@ -134,10 +136,96 @@ function toDeepSeekMessages(
   const messages: ChatMessage[] =
     input.messages.length > 0
       ? input.messages
-      : [{ role: "user", content: "Hello" }];
+      : [{ role: "user", content: "你好" }];
 
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.toolCalls) {
+      return {
+        role: "assistant",
+        content: message.content.length > 0 ? message.content : null,
+        tool_calls: message.toolCalls.map((toolCall) => ({
+          id: toolCall.id,
+          type: "function",
+          function: {
+            name: toolCall.name,
+            arguments: JSON.stringify(toolCall.input)
+          }
+        }))
+      };
+    }
+
+    if (message.role === "tool") {
+      if (!message.toolCallId) {
+        throw new Error("tool 消息缺少 toolCallId。");
+      }
+
+      return {
+        role: "tool",
+        tool_call_id: message.toolCallId,
+        content: message.content
+      };
+    }
+
+    return {
+      role: message.role,
+      content: message.content
+    };
+  });
+}
+
+/**
+ * 将运行时工具定义转换为 DeepSeek/OpenAI-compatible 的工具定义。
+ *
+ * @param tools 运行时工具定义列表。
+ * @returns DeepSeek 聊天接口可接受的工具定义。
+ */
+function toDeepSeekTools(
+  tools: ChatTool[] | undefined
+): OpenAI.Chat.ChatCompletionTool[] | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema
+    }
   }));
+}
+
+/**
+ * 将 DeepSeek 返回的工具调用转换为运行时标准结构。
+ *
+ * @param toolCall DeepSeek 返回的工具调用。
+ * @returns 标准化后的工具调用。
+ */
+function toChatToolCall(
+  toolCall: OpenAI.Chat.ChatCompletionMessageToolCall
+): ChatToolCall {
+  if (toolCall.type !== "function") {
+    throw new Error(`不支持的工具调用类型：${toolCall.type}`);
+  }
+
+  return {
+    id: toolCall.id,
+    name: toolCall.function.name,
+    input: parseToolArguments(toolCall.function.arguments)
+  };
+}
+
+/**
+ * 解析模型生成的工具参数 JSON。
+ *
+ * @param value 模型返回的参数字符串。
+ * @returns 解析后的工具输入。
+ */
+function parseToolArguments(value: string): unknown {
+  if (value.trim().length === 0) {
+    return {};
+  }
+
+  return JSON.parse(value);
 }

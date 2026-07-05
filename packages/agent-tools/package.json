@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"No tests yet\""
+    "test": "echo \"暂无测试\""
   },
   "dependencies": {
     "@mecha/shared": "workspace:*"
