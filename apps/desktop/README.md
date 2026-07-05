@@ -1,7 +1,12 @@
-# Tauri + Vue + TypeScript
+# Mecha Desktop
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Tauri 2 + React 18 desktop application for the Mecha workspace.
 
-## Recommended IDE Setup
+## Scripts
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```bash
+pnpm --filter @mecha/desktop dev
+pnpm --filter @mecha/desktop tauri dev
+pnpm --filter @mecha/desktop typecheck
+pnpm --filter @mecha/desktop build
+```
