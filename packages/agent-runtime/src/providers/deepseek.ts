@@ -1,9 +1,9 @@
 import OpenAI from "openai";
-import { ensureConversation } from "./message-utils.js";
 import type {
   ChatInput,
   ChatOutput,
   ChatStreamEvent,
+  ChatMessage,
   ModelProvider
 } from "./types.js";
 import { ProviderConfigError } from "./types.js";
@@ -89,9 +89,13 @@ export class DeepSeekProvider implements ModelProvider {
     const model = input.model ?? this.defaultModel;
     let content = "";
 
+    const messages = toDeepSeekMessages(input);
+
+    console.log('DeepSeek streamChat messages:', messages);
+
     const stream = await this.client.chat.completions.create({
       model,
-      messages: toDeepSeekMessages(input),
+      messages,
       temperature: input.temperature,
       max_tokens: input.maxOutputTokens,
       stream: true
@@ -127,7 +131,12 @@ export class DeepSeekProvider implements ModelProvider {
 function toDeepSeekMessages(
   input: ChatInput
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
-  return ensureConversation(input.messages).map((message) => ({
+  const messages: ChatMessage[] =
+    input.messages.length > 0
+      ? input.messages
+      : [{ role: "user", content: "Hello" }];
+
+  return messages.map((message) => ({
     role: message.role,
     content: message.content
   }));

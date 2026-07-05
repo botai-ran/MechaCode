@@ -34,7 +34,7 @@ async function main(): Promise<void> {
     {
       role: "system",
       content:
-        "You are Mecha Agent, a concise desktop agent prototype assistant."
+        "回答时请使用中文，内容简洁明了，不要使用表情符号。"
     },
     {
       role: "user",

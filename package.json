@@ -10,10 +10,16 @@
   "scripts": {
     "dev": "pnpm --filter @mecha/desktop tauri dev",
     "build": "pnpm --filter @mecha/desktop tauri build",
+    "check": "pnpm typecheck && pnpm lint",
+    "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"
   },
   "devDependencies": {
-    "typescript": "^5.9.2"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "globals": "^17.7.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.62.1"
   }
 }
