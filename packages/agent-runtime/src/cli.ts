@@ -36,8 +36,8 @@ const MAX_TOOL_ITERATIONS = 6;
 const MAX_MODEL_RETRIES = 2;
 /** 模型请求重试的基础等待时间，单位毫秒。 */
 const MODEL_RETRY_DELAY_MS = 1_000;
-/** CLI 中展示工具结果预览时保留的最大字符数。 */
-const MAX_TOOL_LOG_CHARS = 800;
+/** CLI 中展示单行摘要时保留的最大字符数。 */
+const MAX_SUMMARY_CHARS = 120;
 
 /**
  * CLI 主流程：加载环境变量、解析参数、创建运行时并输出模型回复。
@@ -168,20 +168,19 @@ async function runToolCallingLoop(
   const registry = createDefaultToolRegistry({ workspaceRoot: findWorkspaceRoot() });
   const toolDefinitions = toChatTools(registry.list());
   const messages = [...initialMessages];
-
   for (let index = 0; index < MAX_TOOL_ITERATIONS; index += 1) {
-    logToolProgress(`第 ${index + 1} 轮：发送请求给模型。`);
+    logToolProgress(`第 ${index + 1} 轮：模型正在分析当前对话。`);
     const response = await chatWithRetry(runtime, {
       messages,
       tools: toolDefinitions
     });
 
     if (!response.toolCalls || response.toolCalls.length === 0) {
-      logToolProgress("模型没有继续请求工具，开始输出最终回复。");
+      logToolProgress("本轮对话已完成，下面输出模型回复。");
       return response.content;
     }
 
-    logToolProgress(`模型请求调用 ${response.toolCalls.length} 个工具。`);
+    logToolProgress(`模型决定先执行 ${response.toolCalls.length} 个操作来补充信息。`);
     messages.push({
       role: "assistant",
       content: response.content,
@@ -189,10 +188,9 @@ async function runToolCallingLoop(
     });
 
     for (const toolCall of response.toolCalls) {
-      logToolProgress(`调用工具 ${toolCall.name}`);
-      logToolProgress(`参数：${formatToolLog(toolCall.input)}`);
+      logToolProgress(describeToolCall(toolCall));
       const output = await runToolCall(registry, toolCall);
-      logToolProgress(`结果：${formatToolLog(output)}`);
+      logToolProgress(describeToolResult(toolCall.name, output));
       messages.push({
         role: "tool",
         toolCallId: toolCall.id,
@@ -353,23 +351,145 @@ function sleep(ms: number): Promise<void> {
  * @param message 要展示给 CLI 用户的进度信息。
  */
 function logToolProgress(message: string): void {
-  console.error(`[tool] ${message}`);
+  console.error(`[进度] ${message}`);
 }
 
 /**
- * 格式化工具调用参数或结果，避免日志刷屏。
+ * 将模型发起的工具调用转换为普通用户可读的进度说明。
  *
- * @param value 要展示的值。
- * @returns 适合终端展示的字符串。
+ * @param toolCall 模型请求执行的工具调用。
+ * @returns 单行进度说明。
  */
-function formatToolLog(value: unknown): string {
-  const text = JSON.stringify(value, undefined, 2);
+function describeToolCall(toolCall: ChatToolCall): string {
+  const input = asRecord(toolCall.input);
 
-  if (text.length <= MAX_TOOL_LOG_CHARS) {
-    return text;
+  switch (toolCall.name) {
+    case "read_file":
+      return `读取文件：${formatField(input.path, "未指定路径")}`;
+    case "write_file":
+      return `写入文件：${formatField(input.path, "未指定路径")}`;
+    case "list_dir":
+      return `查看目录：${formatField(input.path, ".")}`;
+    case "search_text":
+      return `搜索文本：${formatField(input.query, "未指定关键词")}${formatPathSuffix(input.path)}`;
+    case "apply_patch":
+      return input.checkOnly === true ? "校验代码补丁。" : "应用代码补丁。";
+    case "run_command":
+      return `运行命令：${formatCommand(input)}`;
+    case "git_diff":
+      return `查看 ${input.staged === true ? "暂存区" : "工作区"} diff${formatPathSuffix(input.path)}。`;
+    case "git_status":
+      return "查看 Git 状态。";
+    default:
+      return `执行操作：${toolCall.name}。`;
+  }
+}
+
+/**
+ * 将工具执行结果转换为普通用户可读的完成说明。
+ *
+ * @param toolName 已执行的工具名称。
+ * @param output 工具执行结果。
+ * @returns 单行完成说明。
+ */
+function describeToolResult(toolName: string, output: unknown): string {
+  const result = asRecord(output);
+
+  if (typeof result.error === "string" && result.error.length > 0) {
+    return `操作失败：${trimSummary(result.error)}`;
   }
 
-  return `${text.slice(0, MAX_TOOL_LOG_CHARS)}...（已截断）`;
+  switch (toolName) {
+    case "read_file":
+      return `读取完成：${formatField(result.path, "目标文件")}，${formatBytes(result.sizeBytes)}${result.truncated === true ? "，内容较长已截断" : ""}。`;
+    case "write_file":
+      return `写入完成：${formatField(result.path, "目标文件")}，${formatBytes(result.sizeBytes)}。`;
+    case "list_dir":
+      return `目录查看完成：${formatField(result.path, ".")}，共 ${arrayLength(result.entries)} 项。`;
+    case "search_text":
+      return `搜索完成：找到 ${arrayLength(result.matches)} 处匹配${result.truncated === true ? "，结果较多已截断" : ""}。`;
+    case "apply_patch":
+      return result.applied === true ? "补丁已应用。" : "补丁校验完成。";
+    case "run_command":
+      return describeCommandResult(result);
+    case "git_diff":
+      return result.truncated === true ? "diff 读取完成，内容较长已截断。" : "diff 读取完成。";
+    case "git_status":
+      return "Git 状态读取完成。";
+    default:
+      return "操作完成。";
+  }
+}
+
+function describeCommandResult(result: Record<string, unknown>): string {
+  if (result.timedOut === true) {
+    return "命令执行超时。";
+  }
+
+  const exitCode = typeof result.exitCode === "number" ? result.exitCode : undefined;
+  if (exitCode !== undefined && exitCode !== 0) {
+    return `命令执行结束，退出码 ${exitCode}。`;
+  }
+
+  return "命令执行完成。";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function formatField(value: unknown, fallback: string): string {
+  return trimSummary(typeof value === "string" && value.length > 0 ? value : fallback);
+}
+
+function formatPathSuffix(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    return "";
+  }
+
+  return `，范围：${trimSummary(value)}`;
+}
+
+function formatCommand(input: Record<string, unknown>): string {
+  const command = typeof input.command === "string" ? input.command : "未指定命令";
+  const args = Array.isArray(input.args)
+    ? input.args.filter((arg): arg is string => typeof arg === "string")
+    : [];
+  const text = args.length > 0 ? `${command} ${args.join(" ")}` : command;
+
+  return trimSummary(text);
+}
+
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function formatBytes(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "大小未知";
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function trimSummary(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= MAX_SUMMARY_CHARS) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, MAX_SUMMARY_CHARS)}...`;
 }
 
 function parseMessagesJson(value: string | undefined): ChatMessage[] {
