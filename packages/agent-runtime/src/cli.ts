@@ -571,7 +571,8 @@ function loadEnv(): void {
 
   for (const path of candidates) {
     if (existsSync(path)) {
-      config({ path, quiet: true });
+      config({ path, quiet: true, override: true });
+      return;
     }
   }
 }

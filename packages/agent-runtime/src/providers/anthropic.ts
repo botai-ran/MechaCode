@@ -12,6 +12,8 @@ import { ProviderConfigError } from "./types.js";
 export interface AnthropicProviderOptions {
   /** Anthropic API Key；未传入时读取 `ANTHROPIC_API_KEY`。 */
   apiKey?: string;
+  /** API 地址；未传入时读取 `ANTHROPIC_BASE_URL`。 */
+  baseURL?: string;
   /** 默认模型；未传入时读取 `ANTHROPIC_MODEL` 或使用内置默认值。 */
   defaultModel?: string;
 }
@@ -34,6 +36,9 @@ export class AnthropicProvider implements ModelProvider {
    */
   constructor(options: AnthropicProviderOptions = {}) {
     const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    const baseURL = normalizeOptionalString(
+      options.baseURL ?? process.env.ANTHROPIC_BASE_URL
+    );
 
     if (!apiKey) {
       throw new ProviderConfigError("缺少 ANTHROPIC_API_KEY。");
@@ -42,8 +47,10 @@ export class AnthropicProvider implements ModelProvider {
     this.defaultModel =
       options.defaultModel ??
       process.env.ANTHROPIC_MODEL ??
-      "claude-opus-4-6";
-    this.client = new Anthropic({ apiKey });
+      (isDeepSeekAnthropicBaseURL(baseURL)
+        ? "deepseek-v4-flash"
+        : "claude-opus-4-6");
+    this.client = new Anthropic({ apiKey, baseURL });
   }
 
   /**
@@ -141,4 +148,15 @@ function collectAnthropicText(content: Anthropic.Message["content"]): string {
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("");
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+
+  return normalized ? normalized : undefined;
+}
+
+function isDeepSeekAnthropicBaseURL(baseURL: string | undefined): boolean {
+  return baseURL?.replace(/\/+$/, "").toLowerCase() ===
+    "https://api.deepseek.com/anthropic";
 }

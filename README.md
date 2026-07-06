@@ -67,12 +67,15 @@ rustup default stable-msvc
 ```txt
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.5
+OPENAI_BASE_URL=
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-opus-4-6
+ANTHROPIC_BASE_URL=
 
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
 当前 CLI 直接读取系统环境变量，暂未接入 `.env` 自动加载。
