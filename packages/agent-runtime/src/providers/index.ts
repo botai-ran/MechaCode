@@ -12,5 +12,4 @@ export type {
 } from "./types.js";
 export { ProviderConfigError } from "./types.js";
 export { AnthropicProvider } from "./anthropic.js";
-export { DeepSeekProvider } from "./deepseek.js";
 export { OpenAIProvider } from "./openai.js";

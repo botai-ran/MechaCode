@@ -56,12 +56,6 @@ export function ChatPanel({
               >
                 Anthropic
               </option>
-              <option
-                value="deepseek"
-                disabled={!availableProviders.includes("deepseek")}
-              >
-                DeepSeek
-              </option>
             </select>
           </label>
           <div

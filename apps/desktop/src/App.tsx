@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAgentConfig, sendAgentMessage } from "./features/chat/agent-client";
+import { getAgentConfig, startAgentRun } from "./features/chat/agent-client";
 import { ChatPanel } from "./features/chat/components/ChatPanel";
 import { ConversationSidebar } from "./features/chat/components/ConversationSidebar";
 import { conversations, initialMessages } from "./features/chat/mock-data";
@@ -31,9 +31,9 @@ function App() {
   );
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [provider, setProvider] = useState<RuntimeProviderId>("deepseek");
+  const [provider, setProvider] = useState<RuntimeProviderId>("openai");
   const [availableProviders, setAvailableProviders] = useState<RuntimeProviderId[]>([
-    "deepseek"
+    "openai"
   ]);
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -75,6 +75,8 @@ function App() {
       return;
     }
 
+    const runId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
     const nextMessages: ChatMessage[] = [
       ...messages,
       {
@@ -83,29 +85,97 @@ function App() {
         content: nextMessage
       }
     ];
+    const optimisticMessages: ChatMessage[] = [
+      ...nextMessages,
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        content: ""
+      }
+    ];
 
-    setMessages(nextMessages);
+    setMessages(optimisticMessages);
     setDraft("");
     setErrorMessage(null);
     setIsSending(true);
+    let runHadError = false;
+    let receivedText = false;
 
     try {
-      const response = await sendAgentMessage({
+      await startAgentRun({
         provider,
-        messages: nextMessages
-      });
+        messages: nextMessages,
+        runId,
+        messageId: assistantMessageId,
+        onEvent: (event) => {
+          if (event.type === "message_start") {
+            setMessages((currentMessages) =>
+              currentMessages.some((message) => message.id === event.messageId)
+                ? currentMessages
+                : [
+                    ...currentMessages,
+                    {
+                      id: event.messageId,
+                      role: "assistant",
+                      content: ""
+                    }
+                  ]
+            );
+          }
 
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: response || "模型返回了空回复。"
+          if (event.type === "text_delta") {
+            if (event.text.length > 0) {
+              receivedText = true;
+            }
+
+            setMessages((currentMessages) =>
+              currentMessages.map((message) =>
+                message.id === event.messageId
+                  ? {
+                      ...message,
+                      content: message.content + event.text
+                    }
+                  : message
+              )
+            );
+          }
+
+          if (event.type === "error") {
+            runHadError = true;
+            setErrorMessage(formatErrorMessage(event.message));
+            setIsSending(false);
+          }
+
+          if (event.type === "run_done") {
+            setIsSending(false);
+          }
         }
-      ]);
+      });
     } catch (error) {
+      runHadError = true;
       setErrorMessage(formatErrorMessage(error));
     } finally {
+      setMessages((currentMessages) =>
+        currentMessages.flatMap((message) => {
+          if (message.id !== assistantMessageId || message.content) {
+            return [message];
+          }
+
+          if (receivedText) {
+            return [];
+          }
+
+          return [
+            {
+              ...message,
+              isSynthetic: true,
+              content: runHadError
+                ? "运行失败，未收到模型回复。"
+                : "模型返回了空回复。"
+            }
+          ];
+        })
+      );
       setIsSending(false);
     }
   }

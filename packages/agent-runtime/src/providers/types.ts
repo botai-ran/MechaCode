@@ -1,5 +1,5 @@
 /** 支持的模型服务商标识。 */
-export type ProviderId = "openai" | "anthropic" | "deepseek";
+export type ProviderId = "openai" | "anthropic";
 
 /** 运行时统一使用的聊天角色。 */
 export type ChatRole = "system" | "user" | "assistant" | "tool";

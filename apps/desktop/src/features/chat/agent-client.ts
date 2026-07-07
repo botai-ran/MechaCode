@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ChatMessage, RuntimeProviderId } from "./types";
+import { listen } from "@tauri-apps/api/event";
+import type { AgentRunEvent, ChatMessage, RuntimeProviderId } from "./types";
+
+const AGENT_RUN_EVENT = "agent-run-event";
 
 type AgentChatRequest = {
   provider: RuntimeProviderId;
@@ -8,6 +11,11 @@ type AgentChatRequest = {
     role: "assistant" | "system" | "user";
     content: string;
   }>;
+};
+
+type AgentRunRequest = AgentChatRequest & {
+  runId: string;
+  messageId: string;
 };
 
 type AgentChatResponse = {
@@ -19,9 +27,6 @@ type AgentConfigResponse = {
   availableProviders: RuntimeProviderId[];
 };
 
-const SYSTEM_PROMPT =
-  "你是 Mecha Agent，一个简洁、可靠的桌面 Agent 原型助手。请使用中文回答。";
-
 export async function getAgentConfig(): Promise<AgentConfigResponse> {
   return invoke<AgentConfigResponse>("get_agent_config");
 }
@@ -32,18 +37,7 @@ export async function sendAgentMessage(options: {
 }): Promise<string> {
   const request: AgentChatRequest = {
     provider: options.provider,
-    messages: [
-      {
-        role: "system",
-        content: SYSTEM_PROMPT
-      },
-      ...options.messages
-        .filter((message) => message.role !== "system")
-        .map((message) => ({
-          role: message.role,
-          content: message.content
-        }))
-    ]
+    messages: toRuntimeMessages(options.messages)
   };
 
   const response = await invoke<AgentChatResponse>("run_agent_chat", {
@@ -51,4 +45,58 @@ export async function sendAgentMessage(options: {
   });
 
   return response.content;
+}
+
+export async function startAgentRun(options: {
+  provider: RuntimeProviderId;
+  messages: ChatMessage[];
+  runId: string;
+  messageId: string;
+  onEvent: (event: AgentRunEvent) => void;
+}): Promise<void> {
+  const request: AgentRunRequest = {
+    runId: options.runId,
+    messageId: options.messageId,
+    provider: options.provider,
+    messages: toRuntimeMessages(options.messages)
+  };
+  let settled = false;
+
+  const unlisten = await listen<AgentRunEvent>(AGENT_RUN_EVENT, (event) => {
+    if (event.payload.runId !== options.runId) {
+      return;
+    }
+
+    options.onEvent(event.payload);
+
+    if (event.payload.type === "run_done") {
+      settled = true;
+      unlisten();
+    }
+  });
+
+  try {
+    await invoke("start_agent_run", { request });
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
+
+  await new Promise<void>((resolve) => {
+    const timer = window.setInterval(() => {
+      if (settled) {
+        window.clearInterval(timer);
+        resolve();
+      }
+    }, 50);
+  });
+}
+
+function toRuntimeMessages(messages: ChatMessage[]): AgentChatRequest["messages"] {
+  return messages
+    .filter((message) => !message.isSynthetic)
+    .map((message) => ({
+      role: message.role,
+      content: message.content
+    }));
 }

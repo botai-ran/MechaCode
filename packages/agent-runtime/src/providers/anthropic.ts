@@ -1,9 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ensureTextConversation, splitSystemMessage } from "./message-utils.js";
+import { ensureConversation, splitSystemMessage } from "./message-utils.js";
 import type {
   ChatInput,
+  ChatMessage,
   ChatOutput,
   ChatStreamEvent,
+  ChatTool,
+  ChatToolCall,
   ModelProvider
 } from "./types.js";
 import { ProviderConfigError } from "./types.js";
@@ -47,9 +50,7 @@ export class AnthropicProvider implements ModelProvider {
     this.defaultModel =
       options.defaultModel ??
       process.env.ANTHROPIC_MODEL ??
-      (isDeepSeekAnthropicBaseURL(baseURL)
-        ? "deepseek-v4-flash"
-        : "claude-opus-4-6");
+      "claude-opus-4-6";
     this.client = new Anthropic({ apiKey, baseURL });
   }
 
@@ -68,13 +69,15 @@ export class AnthropicProvider implements ModelProvider {
       system,
       max_tokens: input.maxOutputTokens ?? 1024,
       temperature: input.temperature,
+      tools: toAnthropicTools(input.tools),
       messages: toAnthropicMessages(input)
     });
 
     return {
       provider: this.id,
       model,
-      content: collectAnthropicText(message.content)
+      content: collectAnthropicText(message.content),
+      toolCalls: collectAnthropicToolCalls(message.content)
     };
   }
 
@@ -89,19 +92,26 @@ export class AnthropicProvider implements ModelProvider {
     const model = input.model ?? this.defaultModel;
     const { system } = splitSystemMessage(input.messages);
     let content = "";
+    const toolUseBlocks = new Map<
+      number,
+      { id: string; name: string; input?: unknown; inputJson: string }
+    >();
 
     const stream = this.client.messages.stream({
       model,
       system,
       max_tokens: input.maxOutputTokens ?? 1024,
       temperature: input.temperature,
+      tools: toAnthropicTools(input.tools),
       messages: toAnthropicMessages(input)
     });
 
-    /* Anthropic 的事件名称不同，这里统一折叠为所有适配器共享的 `text_delta`。 */
+    /* Anthropic 的事件名称不同，这里统一折叠为所有适配器共享的文本和工具调用输出。 */
     for await (const event of stream as AsyncIterable<{
       type: string;
-      delta?: { type?: string; text?: string };
+      index?: number;
+      content_block?: Anthropic.ContentBlock;
+      delta?: { type?: string; text?: string; partial_json?: string };
     }>) {
       if (
         event.type === "content_block_delta" &&
@@ -111,6 +121,31 @@ export class AnthropicProvider implements ModelProvider {
         content += event.delta.text;
         yield { type: "text_delta", text: event.delta.text };
       }
+
+      if (
+        event.type === "content_block_start" &&
+        event.content_block?.type === "tool_use" &&
+        typeof event.index === "number"
+      ) {
+        toolUseBlocks.set(event.index, {
+          id: event.content_block.id,
+          name: event.content_block.name,
+          input: event.content_block.input,
+          inputJson: ""
+        });
+      }
+
+      if (
+        event.type === "content_block_delta" &&
+        event.delta?.type === "input_json_delta" &&
+        typeof event.index === "number"
+      ) {
+        const toolUseBlock = toolUseBlocks.get(event.index);
+
+        if (toolUseBlock) {
+          toolUseBlock.inputJson += getPartialJson(event.delta);
+        }
+      }
     }
 
     yield {
@@ -118,7 +153,8 @@ export class AnthropicProvider implements ModelProvider {
       output: {
         provider: this.id,
         model,
-        content
+        content,
+        toolCalls: toChatToolCallsFromStream(toolUseBlocks)
       }
     };
   }
@@ -131,10 +167,107 @@ export class AnthropicProvider implements ModelProvider {
  * @returns Anthropic 消息数组。
  */
 function toAnthropicMessages(input: ChatInput): Anthropic.MessageParam[] {
-  return ensureTextConversation(input.messages).map((message) => ({
+  const messages: Anthropic.MessageParam[] = [];
+  let toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+  for (const message of ensureConversation(input.messages)) {
+    if (message.role === "tool") {
+      toolResults.push(toAnthropicToolResult(message));
+      continue;
+    }
+
+    if (toolResults.length > 0) {
+      messages.push({
+        role: "user",
+        content: toolResults
+      });
+      toolResults = [];
+    }
+
+    messages.push(toAnthropicMessage(message));
+  }
+
+  if (toolResults.length > 0) {
+    messages.push({
+      role: "user",
+      content: toolResults
+    });
+  }
+
+  return messages;
+}
+
+function toAnthropicMessage(message: ChatMessage): Anthropic.MessageParam {
+  if (message.role === "tool") {
+    return {
+      role: "user",
+      content: [toAnthropicToolResult(message)]
+    };
+  }
+
+  if (message.role === "assistant" && message.toolCalls?.length) {
+    const content: Anthropic.ContentBlockParam[] = [];
+
+    if (message.content) {
+      content.push({
+        type: "text",
+        text: message.content
+      });
+    }
+
+    content.push(
+      ...message.toolCalls.map((toolCall) => ({
+        type: "tool_use" as const,
+        id: toolCall.id,
+        name: toolCall.name,
+        input: toolCall.input
+      }))
+    );
+
+    return {
+      role: "assistant",
+      content
+    };
+  }
+
+  return {
     role: message.role,
     content: message.content
+  };
+}
+
+function toAnthropicToolResult(
+  message: ChatMessage
+): Anthropic.ToolResultBlockParam {
+  return {
+    type: "tool_result",
+    tool_use_id: message.toolCallId ?? "",
+    content: message.content,
+    is_error: isErrorToolResult(message.content)
+  };
+}
+
+function toAnthropicTools(
+  tools: ChatTool[] | undefined
+): Anthropic.Tool[] | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: toAnthropicInputSchema(tool.inputSchema)
   }));
+}
+
+function toAnthropicInputSchema(
+  inputSchema: Record<string, unknown>
+): Anthropic.Tool.InputSchema {
+  return {
+    ...inputSchema,
+    type: "object"
+  };
 }
 
 /**
@@ -150,13 +283,65 @@ function collectAnthropicText(content: Anthropic.Message["content"]): string {
     .join("");
 }
 
+function collectAnthropicToolCalls(
+  content: Anthropic.Message["content"]
+): ChatToolCall[] | undefined {
+  const toolCalls = content
+    .filter((block): block is Anthropic.ToolUseBlock => block.type === "tool_use")
+    .map((block) => ({
+      id: block.id,
+      name: block.name,
+      input: block.input
+    }));
+
+  return toolCalls.length > 0 ? toolCalls : undefined;
+}
+
+function toChatToolCallsFromStream(
+  toolUseBlocks: Map<
+    number,
+    { id: string; name: string; input?: unknown; inputJson: string }
+  >
+): ChatToolCall[] | undefined {
+  const toolCalls = Array.from(toolUseBlocks.values()).map((block) => ({
+    id: block.id,
+    name: block.name,
+    input: parseAnthropicToolInput(block.inputJson, block.input)
+  }));
+
+  return toolCalls.length > 0 ? toolCalls : undefined;
+}
+
+function parseAnthropicToolInput(inputJson: string, fallback: unknown): unknown {
+  if (!inputJson.trim()) {
+    return fallback ?? {};
+  }
+
+  try {
+    return JSON.parse(inputJson);
+  } catch {
+    return {
+      rawArguments: inputJson
+    };
+  }
+}
+
+function getPartialJson(delta: { partial_json?: unknown }): string {
+  return typeof delta.partial_json === "string" ? delta.partial_json : "";
+}
+
+function isErrorToolResult(content: string): boolean {
+  try {
+    const parsed = JSON.parse(content) as { ok?: unknown };
+
+    return parsed.ok === false;
+  } catch {
+    return false;
+  }
+}
+
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const normalized = value?.trim();
 
   return normalized ? normalized : undefined;
-}
-
-function isDeepSeekAnthropicBaseURL(baseURL: string | undefined): boolean {
-  return baseURL?.replace(/\/+$/, "").toLowerCase() ===
-    "https://api.deepseek.com/anthropic";
 }

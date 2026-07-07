@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "mecha-chat": "./dist/cli.js"
+    "mecha-chat": "./dist/cli/index.js"
   },
   "exports": {
     ".": {
@@ -16,9 +16,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "chat": "tsx src/cli.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"暂无测试\""
+    "chat": "tsx src/cli/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",

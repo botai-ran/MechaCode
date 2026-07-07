@@ -14,7 +14,6 @@
 - Rust stable MSVC toolchain
 - OpenAI SDK
 - Anthropic SDK
-- DeepSeek API
 
 ## 环境要求
 
@@ -67,18 +66,15 @@ rustup default stable-msvc
 ```txt
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.5
+# OpenAI-compatible endpoints can be configured here.
 OPENAI_BASE_URL=
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-opus-4-6
 ANTHROPIC_BASE_URL=
-
-DEEPSEEK_API_KEY=
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-当前 CLI 直接读取系统环境变量，暂未接入 `.env` 自动加载。
+当前 CLI 会优先读取仓库根目录或当前目录下的 `.env` 文件，也支持直接读取系统环境变量。
 
 ## 常用命令
 
@@ -111,7 +107,6 @@ pnpm build
 ```bash
 pnpm --filter @mecha/agent-runtime chat -- --provider openai "你好"
 pnpm --filter @mecha/agent-runtime chat -- --provider anthropic "你好"
-pnpm --filter @mecha/agent-runtime chat -- --provider deepseek "你好"
 ```
 
 指定模型：
@@ -120,18 +115,5 @@ pnpm --filter @mecha/agent-runtime chat -- --provider deepseek "你好"
 pnpm --filter @mecha/agent-runtime chat -- --provider openai --model gpt-5.5 "你好"
 ```
 
-## 当前状态
+OpenAI-compatible 服务可通过 `OPENAI_BASE_URL` 和 `OPENAI_MODEL` 接入，CLI 仍使用 `--provider openai`。
 
-- 已创建 Tauri + React 桌面端。
-- 已创建 pnpm workspace 和基础 packages。
-- 已接入 OpenAI / Anthropic SDK。
-- 已实现 `agent-runtime` 的简单对话 CLI。
-- 已通过 `pnpm typecheck`。
-
-下一步建议：定义桌面 UI 与 Agent Runtime 的通信协议，再把 CLI 对话能力接入 Tauri。
-
-## 工程约定
-
-- [文档目录](docs/README.md)
-- [桌面端工程架构约定](docs/architecture/desktop.md)
-- [桌面端 UI 开发规范](docs/design/ui-style.md)

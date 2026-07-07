@@ -1,11 +1,28 @@
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter};
+
+const AGENT_RUN_EVENT: &str = "agent-run-event";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentChatRequest {
+    provider: Option<String>,
+    model: Option<String>,
+    messages: Vec<AgentChatMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentRunRequest {
+    run_id: Option<String>,
+    message_id: Option<String>,
     provider: Option<String>,
     model: Option<String>,
     messages: Vec<AgentChatMessage>,
@@ -21,6 +38,12 @@ struct AgentChatMessage {
 #[serde(rename_all = "camelCase")]
 struct AgentChatResponse {
     content: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentRunStartedResponse {
+    run_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,6 +65,30 @@ async fn run_agent_chat(request: AgentChatRequest) -> Result<AgentChatResponse, 
         .map_err(|error| format!("agent 后台任务执行失败：{error}"))?
 }
 
+#[tauri::command]
+async fn start_agent_run(
+    app: AppHandle,
+    request: AgentRunRequest,
+) -> Result<AgentRunStartedResponse, String> {
+    let run_id = request
+        .run_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(create_run_id);
+
+    let response = AgentRunStartedResponse {
+        run_id: run_id.clone(),
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = run_agent_run_streaming(app.clone(), request, run_id.clone()) {
+            emit_agent_error(&app, &run_id, error);
+        }
+    });
+
+    Ok(response)
+}
+
 fn run_agent_chat_blocking(request: AgentChatRequest) -> Result<AgentChatResponse, String> {
     let config = resolve_agent_config()?;
     let provider = request
@@ -49,7 +96,7 @@ fn run_agent_chat_blocking(request: AgentChatRequest) -> Result<AgentChatRespons
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| config.default_provider.clone());
 
-    if !matches!(provider.as_str(), "openai" | "anthropic" | "deepseek") {
+    if !matches!(provider.as_str(), "openai" | "anthropic") {
         return Err("不支持当前模型服务商。".to_string());
     }
 
@@ -71,6 +118,7 @@ fn run_agent_chat_blocking(request: AgentChatRequest) -> Result<AgentChatRespons
         .arg("--")
         .arg("--provider")
         .arg(provider)
+        .arg("--no-tools")
         .arg("--no-stream");
 
     if let Some(model) = request.model.filter(|value| !value.trim().is_empty()) {
@@ -102,6 +150,136 @@ fn run_agent_chat_blocking(request: AgentChatRequest) -> Result<AgentChatRespons
     })
 }
 
+fn run_agent_run_streaming(
+    app: AppHandle,
+    request: AgentRunRequest,
+    run_id: String,
+) -> Result<(), String> {
+    let config = resolve_agent_config()?;
+    let provider = normalize_provider(request.provider, &config)?;
+
+    if request.messages.is_empty() {
+        return Err("消息列表不能为空。".to_string());
+    }
+
+    let messages_json =
+        serde_json::to_string(&request.messages).map_err(|error| error.to_string())?;
+    let root = workspace_root()?;
+    let mut command = Command::new(pnpm_command());
+
+    command
+        .current_dir(root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("--silent")
+        .arg("--filter")
+        .arg("@mecha/agent-runtime")
+        .arg("chat")
+        .arg("--")
+        .arg("--provider")
+        .arg(provider)
+        .arg("--no-tools")
+        .arg("--events-json-lines")
+        .arg("--run-id")
+        .arg(&run_id);
+
+    if let Some(message_id) = request.message_id.filter(|value| !value.trim().is_empty()) {
+        command.arg("--message-id").arg(message_id);
+    }
+
+    if let Some(model) = request.model.filter(|value| !value.trim().is_empty()) {
+        command.arg("--model").arg(model);
+    }
+
+    let mut child = command
+        .arg("--messages-json-base64")
+        .arg(base64_encode(messages_json.as_bytes()))
+        .spawn()
+        .map_err(|error| format!("启动 agent 运行时失败：{error}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "读取 agent 事件流失败：stdout 不可用。".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "读取 agent 错误流失败：stderr 不可用。".to_string())?;
+    let stderr_handle = thread::spawn(move || read_stream_to_string(stderr));
+
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|error| format!("读取 agent 事件失败：{error}"))?;
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let event: serde_json::Value =
+            serde_json::from_str(&line).map_err(|error| format!("解析 agent 事件失败：{error}"))?;
+        app.emit(AGENT_RUN_EVENT, event)
+            .map_err(|error| format!("转发 agent 事件失败：{error}"))?;
+    }
+
+    let status = child
+        .wait()
+        .map_err(|error| format!("等待 agent 运行时退出失败：{error}"))?;
+    let stderr = stderr_handle
+        .join()
+        .map_err(|_| "读取 agent 错误流线程失败。".to_string())?;
+
+    if !status.success() {
+        let detail = stderr.trim();
+        let message = if detail.is_empty() {
+            "agent 运行时已退出，但没有返回错误信息。".to_string()
+        } else {
+            format!("agent 运行时执行失败：{detail}")
+        };
+
+        return Err(message);
+    }
+
+    Ok(())
+}
+
+fn normalize_provider(
+    provider: Option<String>,
+    config: &AgentConfigResponse,
+) -> Result<String, String> {
+    let provider = provider
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| config.default_provider.clone());
+
+    if !matches!(provider.as_str(), "openai" | "anthropic") {
+        return Err("不支持当前模型服务商。".to_string());
+    }
+
+    Ok(provider)
+}
+
+fn emit_agent_error(app: &AppHandle, run_id: &str, message: String) {
+    let _ = app.emit(
+        AGENT_RUN_EVENT,
+        json!({
+            "type": "error",
+            "runId": run_id,
+            "message": message
+        }),
+    );
+    let _ = app.emit(
+        AGENT_RUN_EVENT,
+        json!({
+            "type": "run_done",
+            "runId": run_id
+        }),
+    );
+}
+
+fn read_stream_to_string(mut stream: impl Read) -> String {
+    let mut output = String::new();
+    let _ = stream.read_to_string(&mut output);
+    output
+}
+
 fn workspace_root() -> Result<PathBuf, String> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -109,6 +287,15 @@ fn workspace_root() -> Result<PathBuf, String> {
         .and_then(|path| path.parent())
         .map(PathBuf::from)
         .ok_or_else(|| "解析工作区根目录失败。".to_string())
+}
+
+fn create_run_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+
+    format!("run-{millis}")
 }
 
 fn resolve_agent_config() -> Result<AgentConfigResponse, String> {
@@ -122,10 +309,6 @@ fn resolve_agent_config() -> Result<AgentConfigResponse, String> {
 
     if has_config_value(&env_content, "ANTHROPIC_API_KEY") {
         available_providers.push("anthropic".to_string());
-    }
-
-    if has_config_value(&env_content, "DEEPSEEK_API_KEY") {
-        available_providers.push("deepseek".to_string());
     }
 
     let default_provider = available_providers
@@ -173,8 +356,7 @@ fn pnpm_command() -> &'static str {
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
 
     for chunk in bytes.chunks(3) {
@@ -206,7 +388,11 @@ fn base64_encode(bytes: &[u8]) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_agent_config, run_agent_chat])
+        .invoke_handler(tauri::generate_handler![
+            get_agent_config,
+            run_agent_chat,
+            start_agent_run
+        ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出错");
 }

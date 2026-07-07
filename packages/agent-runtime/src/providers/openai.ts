@@ -2,8 +2,11 @@ import OpenAI from "openai";
 import { ensureTextConversation, splitSystemMessage } from "./message-utils.js";
 import type {
   ChatInput,
+  ChatMessage,
   ChatOutput,
   ChatStreamEvent,
+  ChatTool,
+  ChatToolCall,
   ModelProvider
 } from "./types.js";
 import { ProviderConfigError } from "./types.js";
@@ -27,7 +30,7 @@ export class OpenAIProvider implements ModelProvider {
 
   /** OpenAI 官方 SDK 客户端。 */
   private readonly client: OpenAI;
-  /** OpenAI-compatible endpoints such as DeepSeek usually support chat completions, not Responses. */
+  /** 兼容 OpenAI 协议的网关通常只支持 Chat Completions，因此这里保留兼容分支。 */
   private readonly useChatCompletions: boolean;
 
   /**
@@ -49,7 +52,7 @@ export class OpenAIProvider implements ModelProvider {
     this.defaultModel =
       options.defaultModel ??
       process.env.OPENAI_MODEL ??
-      (isDeepSeekBaseURL(baseURL) ? "deepseek-v4-flash" : "gpt-5.5");
+      "gpt-5.5";
     this.useChatCompletions =
       baseURL !== undefined && !isOpenAIBaseURL(baseURL);
     this.client = new OpenAI({ apiKey, baseURL });
@@ -64,18 +67,21 @@ export class OpenAIProvider implements ModelProvider {
   async chat(input: ChatInput): Promise<ChatOutput> {
     const model = input.model ?? this.defaultModel;
 
-    if (this.useChatCompletions) {
+    if (this.useChatCompletions || hasTools(input)) {
       const response = await this.client.chat.completions.create({
         model,
         messages: toOpenAIChatMessages(input),
+        tools: toOpenAIChatTools(input.tools),
         temperature: input.temperature,
         max_tokens: input.maxOutputTokens
       });
+      const message = response.choices[0]?.message;
 
       return {
         provider: this.id,
         model,
-        content: response.choices[0]?.message.content ?? ""
+        content: message?.content ?? "",
+        toolCalls: toChatToolCalls(message?.tool_calls)
       };
     }
 
@@ -111,21 +117,47 @@ export class OpenAIProvider implements ModelProvider {
     const model = input.model ?? this.defaultModel;
     let content = "";
 
-    if (this.useChatCompletions) {
+    if (this.useChatCompletions || hasTools(input)) {
       const stream = await this.client.chat.completions.create({
         model,
         messages: toOpenAIChatMessages(input),
+        tools: toOpenAIChatTools(input.tools),
         temperature: input.temperature,
         max_tokens: input.maxOutputTokens,
         stream: true
       });
+      const toolCallDeltas = new Map<
+        number,
+        { id?: string; name?: string; arguments: string }
+      >();
 
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta.content;
+        const choice = chunk.choices[0];
+        const delta = choice?.delta.content;
 
         if (typeof delta === "string" && delta.length > 0) {
           content += delta;
           yield { type: "text_delta", text: delta };
+        }
+
+        for (const toolCall of choice?.delta.tool_calls ?? []) {
+          const current = toolCallDeltas.get(toolCall.index) ?? {
+            arguments: ""
+          };
+
+          if (toolCall.id) {
+            current.id = toolCall.id;
+          }
+
+          if (toolCall.function?.name) {
+            current.name = toolCall.function.name;
+          }
+
+          if (toolCall.function?.arguments) {
+            current.arguments += toolCall.function.arguments;
+          }
+
+          toolCallDeltas.set(toolCall.index, current);
         }
       }
 
@@ -134,7 +166,20 @@ export class OpenAIProvider implements ModelProvider {
         output: {
           provider: this.id,
           model,
-          content
+          content,
+          toolCalls: Array.from(toolCallDeltas.values())
+            .filter(
+              (toolCall): toolCall is {
+                id: string;
+                name: string;
+                arguments: string;
+              } => Boolean(toolCall.id && toolCall.name)
+            )
+            .map((toolCall) => ({
+              id: toolCall.id,
+              name: toolCall.name,
+              input: parseToolArguments(toolCall.arguments)
+            }))
         }
       };
       return;
@@ -175,9 +220,7 @@ export class OpenAIProvider implements ModelProvider {
   }
 }
 
-function toOpenAIChatMessages(
-  input: ChatInput
-): OpenAI.Chat.ChatCompletionMessageParam[] {
+function toOpenAIChatMessages(input: ChatInput): OpenAI.Chat.ChatCompletionMessageParam[] {
   const { system, conversation } = splitSystemMessage(input.messages);
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
@@ -185,14 +228,95 @@ function toOpenAIChatMessages(
     messages.push({ role: "system", content: system });
   }
 
-  messages.push(
-    ...ensureTextConversation(conversation).map((message) => ({
-      role: message.role,
-      content: message.content
-    }))
-  );
+  messages.push(...conversation.map(toOpenAIChatMessage));
 
   return messages;
+}
+
+function toOpenAIChatMessage(
+  message: ChatMessage
+): OpenAI.Chat.ChatCompletionMessageParam {
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: message.toolCallId ?? "",
+      content: message.content
+    };
+  }
+
+  if (message.role === "assistant") {
+    return {
+      role: "assistant",
+      content: message.content,
+      tool_calls: message.toolCalls?.map((toolCall) => ({
+        id: toolCall.id,
+        type: "function",
+        function: {
+          name: toolCall.name,
+          arguments: JSON.stringify(toolCall.input)
+        }
+      }))
+    };
+  }
+
+  return {
+    role: message.role,
+    content: message.content
+  };
+}
+
+function toOpenAIChatTools(
+  tools: ChatTool[] | undefined
+): OpenAI.Chat.ChatCompletionTool[] | undefined {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema
+    }
+  }));
+}
+
+function toChatToolCalls(
+  toolCalls:
+    | OpenAI.Chat.ChatCompletionMessageToolCall[]
+    | undefined
+): ChatToolCall[] | undefined {
+  if (!toolCalls || toolCalls.length === 0) {
+    return undefined;
+  }
+
+  return toolCalls
+    .filter(
+      (
+        toolCall
+      ): toolCall is OpenAI.Chat.ChatCompletionMessageFunctionToolCall =>
+        toolCall.type === "function"
+    )
+    .map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.function.name,
+      input: parseToolArguments(toolCall.function.arguments)
+    }));
+}
+
+function parseToolArguments(value: string): unknown {
+  if (!value.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {
+      rawArguments: value
+    };
+  }
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {
@@ -201,12 +325,12 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return normalized ? normalized : undefined;
 }
 
-function isDeepSeekBaseURL(baseURL: string | undefined): boolean {
-  return baseURL?.toLowerCase().includes("api.deepseek.com") ?? false;
-}
-
 function isOpenAIBaseURL(baseURL: string): boolean {
   const normalized = baseURL.replace(/\/+$/, "").toLowerCase();
 
   return normalized === "https://api.openai.com/v1";
+}
+
+function hasTools(input: ChatInput): boolean {
+  return Boolean(input.tools && input.tools.length > 0);
 }

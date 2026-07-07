@@ -1,18 +1,22 @@
 import {
   AnthropicProvider,
-  DeepSeekProvider,
   OpenAIProvider,
   type ChatInput,
   type ChatOutput,
   type ChatStreamEvent,
   type ModelProvider,
   type ProviderId
-} from "./providers/index.js";
+} from "../providers/index.js";
+import {
+  runAgentChat,
+  type AgentRunChatOptions,
+  type AgentRunEvent
+} from "./agent-run.js";
 
 /** ChatRuntime 的初始化选项。 */
 export interface ChatRuntimeOptions {
   /** 本次运行要使用的模型服务商。 */
-  provider: ProviderId;
+  provider: ProviderId | ModelProvider;
   /** 可选默认模型；会在单次请求未指定模型时使用。 */
   model?: string;
 }
@@ -30,7 +34,10 @@ export class ChatRuntime {
    * @param options 运行时配置。
    */
   constructor(options: ChatRuntimeOptions) {
-    this.provider = createProvider(options.provider);
+    this.provider =
+      typeof options.provider === "string"
+        ? createProvider(options.provider)
+        : options.provider;
     this.model = options.model;
   }
 
@@ -59,6 +66,20 @@ export class ChatRuntime {
       model: input.model ?? this.model
     });
   }
+
+  run(
+    input: ChatInput,
+    options?: AgentRunChatOptions
+  ): AsyncIterable<AgentRunEvent> {
+    return runAgentChat(
+      this.provider,
+      {
+        ...input,
+        model: input.model ?? this.model
+      },
+      options
+    );
+  }
 }
 
 /**
@@ -75,7 +96,5 @@ export function createProvider(provider: ProviderId): ModelProvider {
       return new OpenAIProvider();
     case "anthropic":
       return new AnthropicProvider();
-    case "deepseek":
-      return new DeepSeekProvider();
   }
 }

@@ -16,24 +16,27 @@ export function MessageStream({ messages, isSending }: MessageStreamProps) {
     if (stream) {
       stream.scrollTop = stream.scrollHeight;
     }
-  }, [visibleMessages.length, isSending]);
+  }, [visibleMessages, isSending]);
 
   return (
     <div className="message-stream" ref={streamRef}>
       {visibleMessages.map((message) => (
-        <article className={`message ${message.role}`} key={message.id}>
+        <article
+          className={`message ${message.role}${
+            isSending && message.role === "assistant" && !message.content
+              ? " is-pending"
+              : ""
+          }`}
+          key={message.id}
+        >
           <span className="message-role">
             {message.role === "assistant" ? "助手" : "你"}
           </span>
-          <div className="message-content">{message.content}</div>
+          <div className="message-content">
+            {message.content || "正在生成回复..."}
+          </div>
         </article>
       ))}
-      {isSending ? (
-        <article className="message assistant is-pending" aria-live="polite">
-          <span className="message-role">助手</span>
-          <div className="message-content">正在调用模型和工具，请稍候...</div>
-        </article>
-      ) : null}
     </div>
   );
 }
