@@ -20,6 +20,7 @@ export type {
   SearchTextMatch,
   SearchTextOutput,
   ToolInputSchema,
+  ToolPermissionCategory,
   WorkspaceToolOptions,
   WriteFileInput,
   WriteFileOutput

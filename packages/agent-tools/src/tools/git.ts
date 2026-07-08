@@ -19,6 +19,7 @@ export function createGitDiffTool(
   return {
     name: "git_diff",
     description: "读取当前 Git diff，可选 staged 或限定工作区内单个路径。",
+    permission: "read",
     inputSchema: {
       type: "object",
       properties: {
@@ -68,6 +69,7 @@ export function createGitStatusTool(
   return {
     name: "git_status",
     description: "读取当前 Git 仓库状态。",
+    permission: "read",
     inputSchema: {
       type: "object",
       properties: {

@@ -1,3 +1,7 @@
+import type { ToolPermissionCategory } from "@mecha/protocol";
+
+export type { ToolPermissionCategory };
+
 /** 面向 tool calling 暴露的 JSON Schema 结构。 */
 export type ToolInputSchema = Record<string, unknown>;
 
@@ -7,6 +11,8 @@ export interface AgentTool<I = unknown, O = unknown> {
   name: string;
   /** 面向调用方的简短描述，用来解释这个工具能做什么。 */
   description: string;
+  /** 工具权限分类，用于调用前展示风险等级和后续权限确认。 */
+  permission: ToolPermissionCategory;
   /** 用于模型理解入参结构的 JSON Schema。 */
   inputSchema?: ToolInputSchema;
   /** 执行工具并返回结构化结果。 */

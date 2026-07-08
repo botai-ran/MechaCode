@@ -18,6 +18,7 @@
     "test": "echo \"暂无测试\""
   },
   "dependencies": {
+    "@mecha/protocol": "workspace:*",
     "@mecha/shared": "workspace:*"
   },
   "devDependencies": {

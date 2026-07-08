@@ -97,6 +97,9 @@ importers:
 
   packages/agent-tools:
     dependencies:
+      '@mecha/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@mecha/shared':
         specifier: workspace:*
         version: link:../shared

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +25,7 @@ struct AgentRunRequest {
     message_id: Option<String>,
     provider: Option<String>,
     model: Option<String>,
+    workspace_root: Option<String>,
     messages: Vec<AgentChatMessage>,
 }
 
@@ -51,6 +52,7 @@ struct AgentRunStartedResponse {
 struct AgentConfigResponse {
     default_provider: String,
     available_providers: Vec<String>,
+    default_workspace_root: String,
 }
 
 #[tauri::command]
@@ -106,7 +108,7 @@ fn run_agent_chat_blocking(request: AgentChatRequest) -> Result<AgentChatRespons
 
     let messages_json =
         serde_json::to_string(&request.messages).map_err(|error| error.to_string())?;
-    let root = workspace_root()?;
+    let root = repo_root()?;
     let mut command = Command::new(pnpm_command());
 
     command
@@ -164,7 +166,8 @@ fn run_agent_run_streaming(
 
     let messages_json =
         serde_json::to_string(&request.messages).map_err(|error| error.to_string())?;
-    let root = workspace_root()?;
+    let root = repo_root()?;
+    let workspace_root = resolve_agent_workspace_root(request.workspace_root.as_deref(), &root)?;
     let mut command = Command::new(pnpm_command());
 
     command
@@ -178,7 +181,8 @@ fn run_agent_run_streaming(
         .arg("--")
         .arg("--provider")
         .arg(provider)
-        .arg("--no-tools")
+        .arg("--workspace-root")
+        .arg(path_for_cli(&workspace_root))
         .arg("--events-json-lines")
         .arg("--run-id")
         .arg(&run_id);
@@ -280,13 +284,93 @@ fn read_stream_to_string(mut stream: impl Read) -> String {
     output
 }
 
-fn workspace_root() -> Result<PathBuf, String> {
+fn repo_root() -> Result<PathBuf, String> {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|path| path.parent())
         .and_then(|path| path.parent())
         .map(PathBuf::from)
         .ok_or_else(|| "解析工作区根目录失败。".to_string())
+}
+
+fn resolve_agent_workspace_root(
+    requested_root: Option<&str>,
+    default_root: &Path,
+) -> Result<PathBuf, String> {
+    let raw_path = requested_root
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_root.to_path_buf());
+    let workspace_root = if raw_path.is_absolute() {
+        raw_path
+    } else {
+        default_root.join(raw_path)
+    };
+    let metadata = fs::metadata(&workspace_root).map_err(|error| {
+        format!(
+            "读取 Agent 工作区失败：{}，原因：{error}",
+            workspace_root.display()
+        )
+    })?;
+
+    if !metadata.is_dir() {
+        return Err(format!(
+            "Agent 工作区必须是目录：{}",
+            workspace_root.display()
+        ));
+    }
+
+    Ok(workspace_root)
+}
+
+fn path_for_cli(path: &Path) -> String {
+    normalize_windows_extended_path(path.to_string_lossy().as_ref())
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_windows_extended_path(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("\\\\?\\UNC\\") {
+        return format!("\\\\{rest}");
+    }
+
+    if let Some(rest) = path.strip_prefix("\\\\?\\") {
+        return rest.to_string();
+    }
+
+    if let Some(rest) = path.strip_prefix("\\?\\") {
+        return rest.to_string();
+    }
+
+    path.to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn normalize_windows_extended_path(path: &str) -> String {
+    path.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_windows_extended_path;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn normalizes_windows_extended_drive_path() {
+        assert_eq!(
+            normalize_windows_extended_path(r"\\?\D:\Study\Project\MechaCode"),
+            r"D:\Study\Project\MechaCode"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn normalizes_malformed_windows_extended_drive_path() {
+        assert_eq!(
+            normalize_windows_extended_path(r"\?\D:\Study\Project\MechaCode"),
+            r"D:\Study\Project\MechaCode"
+        );
+    }
 }
 
 fn create_run_id() -> String {
@@ -299,7 +383,7 @@ fn create_run_id() -> String {
 }
 
 fn resolve_agent_config() -> Result<AgentConfigResponse, String> {
-    let root = workspace_root()?;
+    let root = repo_root()?;
     let env_content = fs::read_to_string(root.join(".env")).unwrap_or_default();
     let mut available_providers = Vec::new();
 
@@ -319,6 +403,7 @@ fn resolve_agent_config() -> Result<AgentConfigResponse, String> {
     Ok(AgentConfigResponse {
         default_provider,
         available_providers,
+        default_workspace_root: root.to_string_lossy().to_string(),
     })
 }
 

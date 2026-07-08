@@ -23,6 +23,9 @@ export interface ToolCall {
   input: unknown;
 }
 
+/** 工具调用的权限分类，用于 UI 标记风险等级和后续权限确认。 */
+export type ToolPermissionCategory = "command" | "read" | "write";
+
 /** 一次 Agent run 过程中 runtime 对外抛出的标准事件。 */
 export type AgentRunEvent =
   /** 运行开始，`runId` 用于把后续事件归并到同一次执行。 */
@@ -36,7 +39,14 @@ export type AgentRunEvent =
   /** 当前 assistant 消息生成结束。 */
   | { type: "message_done"; runId: string; messageId: string }
   /** 模型请求调用工具，`input` 是待执行的结构化入参。 */
-  | { type: "tool_call_start"; runId: string; toolCallId: string; name: string; input: unknown }
+  | {
+      type: "tool_call_start";
+      runId: string;
+      toolCallId: string;
+      name: string;
+      permission: ToolPermissionCategory;
+      input: unknown;
+    }
   /** 工具调用动作结束，表示工具执行阶段已收口。 */
   | { type: "tool_call_done"; runId: string; toolCallId: string }
   /** 工具执行结果，成功和失败都应包装为可序列化对象。 */

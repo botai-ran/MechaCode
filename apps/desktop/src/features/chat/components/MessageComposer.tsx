@@ -4,7 +4,9 @@ type MessageComposerProps = {
   draft: string;
   errorMessage: string | null;
   isSending: boolean;
+  workspaceRoot: string;
   onDraftChange: (draft: string) => void;
+  onWorkspaceRootChange: (workspaceRoot: string) => void;
   onSubmit: () => void;
 };
 
@@ -12,7 +14,9 @@ export function MessageComposer({
   draft,
   errorMessage,
   isSending,
+  workspaceRoot,
   onDraftChange,
+  onWorkspaceRootChange,
   onSubmit
 }: MessageComposerProps) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -29,6 +33,16 @@ export function MessageComposer({
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
+      <label className="workspace-control">
+        <span>Agent 工作区</span>
+        <input
+          value={workspaceRoot}
+          disabled={isSending}
+          onChange={(event) => onWorkspaceRootChange(event.target.value)}
+          placeholder="输入 Agent 可访问的工作区绝对路径"
+          aria-label="Agent 工作区"
+        />
+      </label>
       <textarea
         value={draft}
         disabled={isSending}

@@ -14,6 +14,7 @@ export function createApplyPatchTool(
   return {
     name: "apply_patch",
     description: "在工作区根目录通过 git apply 校验或应用 unified diff 补丁。",
+    permission: "write",
     inputSchema: {
       type: "object",
       properties: {

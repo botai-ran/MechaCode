@@ -23,6 +23,8 @@ interface CliOptions {
   useTools: boolean;
   /** 是否按 JSON Lines 输出完整 AgentRunEvent，供桌面端转发事件流。 */
   eventsJsonLines: boolean;
+  /** 工具调用允许访问的工作区根目录；默认使用当前进程目录。 */
+  workspaceRoot?: string;
   /** 外部指定的 run id，用于桌面端在监听前建立事件归并键。 */
   runId?: string;
   /** 外部指定的首条 assistant 消息 id，便于前端提前创建占位消息。 */
@@ -53,7 +55,9 @@ async function main(): Promise<void> {
   ];
 
   const toolRegistry = options.useTools
-    ? createDefaultToolRegistry({ workspaceRoot: process.cwd() })
+    ? createDefaultToolRegistry({
+        workspaceRoot: options.workspaceRoot ?? process.cwd()
+      })
     : undefined;
   let content = "";
   let hasError = false;
@@ -150,6 +154,11 @@ async function parseOptions(args: string[]): Promise<CliOptions> {
 
     if (arg === "--events-json-lines") {
       options.eventsJsonLines = true;
+      continue;
+    }
+
+    if (arg === "--workspace-root") {
+      options.workspaceRoot = readRequiredValue(args, ++index, "--workspace-root");
       continue;
     }
 

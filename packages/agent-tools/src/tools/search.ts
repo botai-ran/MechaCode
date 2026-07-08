@@ -21,6 +21,7 @@ export function createSearchTextTool(
   return {
     name: "search_text",
     description: "在工作区内递归全文搜索文本内容。",
+    permission: "read",
     inputSchema: {
       type: "object",
       properties: {

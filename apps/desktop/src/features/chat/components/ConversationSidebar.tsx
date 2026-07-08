@@ -3,18 +3,27 @@ import type { Conversation } from "../types";
 type ConversationSidebarProps = {
   conversations: Conversation[];
   activeConversationId: string;
+  disabled: boolean;
+  onNewConversation: () => void;
   onSelectConversation: (conversationId: string) => void;
 };
 
 export function ConversationSidebar({
   conversations,
   activeConversationId,
+  disabled,
+  onNewConversation,
   onSelectConversation
 }: ConversationSidebarProps) {
   return (
     <aside className="conversation-sidebar" aria-label="会话记录">
       <div className="sidebar-header">
-        <button className="new-chat-button" type="button">
+        <button
+          className="new-chat-button"
+          type="button"
+          disabled={disabled}
+          onClick={onNewConversation}
+        >
           <span aria-hidden="true">+</span>
           新建会话
         </button>
@@ -30,6 +39,7 @@ export function ConversationSidebar({
             }
             key={conversation.id}
             type="button"
+            disabled={disabled}
             onClick={() => onSelectConversation(conversation.id)}
           >
             <span className="conversation-title">{conversation.title}</span>

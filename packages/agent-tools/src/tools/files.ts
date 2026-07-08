@@ -30,6 +30,7 @@ export function createReadFileTool(
   return {
     name: "read_file",
     description: "读取工作区内的文本文件，可限制最大读取字节数。",
+    permission: "read",
     inputSchema: {
       type: "object",
       properties: {
@@ -72,6 +73,7 @@ export function createWriteFileTool(
   return {
     name: "write_file",
     description: "写入工作区内的文本文件，默认会自动创建父目录。",
+    permission: "write",
     inputSchema: {
       type: "object",
       properties: {
@@ -115,6 +117,7 @@ export function createListDirTool(
   return {
     name: "list_dir",
     description: "列出工作区内目录的直接子项。",
+    permission: "read",
     inputSchema: {
       type: "object",
       properties: {

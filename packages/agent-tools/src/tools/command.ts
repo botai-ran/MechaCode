@@ -17,6 +17,7 @@ export function createRunCommandTool(
   return {
     name: "run_command",
     description: "在工作区内执行命令和参数数组，返回退出码、stdout 与 stderr。",
+    permission: "command",
     inputSchema: {
       type: "object",
       properties: {

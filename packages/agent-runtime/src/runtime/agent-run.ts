@@ -96,6 +96,7 @@ export async function* runAgentChat(
           runId,
           toolCallId: toolCall.id,
           name: toolCall.name,
+          permission: options.toolRegistry.get(toolCall.name)?.permission ?? "command",
           input: toolCall.input
         };
 

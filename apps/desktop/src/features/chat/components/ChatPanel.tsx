@@ -1,6 +1,11 @@
 import { MessageComposer } from "./MessageComposer";
 import { MessageStream } from "./MessageStream";
-import type { ChatMessage, Conversation, RuntimeProviderId } from "../types";
+import type {
+  AgentRunStatus,
+  ChatMessage,
+  Conversation,
+  RuntimeProviderId
+} from "../types";
 
 type ChatPanelProps = {
   conversation: Conversation;
@@ -8,9 +13,12 @@ type ChatPanelProps = {
   draft: string;
   errorMessage: string | null;
   isSending: boolean;
+  runStatus: AgentRunStatus;
+  workspaceRoot: string;
   availableProviders: RuntimeProviderId[];
   provider: RuntimeProviderId;
   onDraftChange: (draft: string) => void;
+  onWorkspaceRootChange: (workspaceRoot: string) => void;
   onProviderChange: (provider: RuntimeProviderId) => void;
   onSubmitMessage: () => void;
 };
@@ -21,12 +29,17 @@ export function ChatPanel({
   draft,
   errorMessage,
   isSending,
+  runStatus,
+  workspaceRoot,
   availableProviders,
   provider,
   onDraftChange,
+  onWorkspaceRootChange,
   onProviderChange,
   onSubmitMessage
 }: ChatPanelProps) {
+  const statusText = getRunStatusText(runStatus, isSending, conversation.status);
+
   return (
     <section className="chat-panel" aria-label="当前对话">
       <header className="chat-header">
@@ -59,11 +72,11 @@ export function ChatPanel({
             </select>
           </label>
           <div
-            className="chat-status"
-            aria-label={`状态：${isSending ? "运行中" : conversation.status}`}
+            className={`chat-status is-${runStatus}`}
+            aria-label={`状态：${statusText}`}
           >
             <span aria-hidden="true" />
-            {isSending ? "运行中" : conversation.status}
+            {statusText}
           </div>
         </div>
       </header>
@@ -74,9 +87,32 @@ export function ChatPanel({
         draft={draft}
         errorMessage={errorMessage}
         isSending={isSending}
+        workspaceRoot={workspaceRoot}
         onDraftChange={onDraftChange}
+        onWorkspaceRootChange={onWorkspaceRootChange}
         onSubmit={onSubmitMessage}
       />
     </section>
   );
+}
+
+function getRunStatusText(
+  runStatus: AgentRunStatus,
+  isSending: boolean,
+  fallback: string
+): string {
+  if (!isSending && runStatus === "idle") {
+    return fallback;
+  }
+
+  const labels: Record<AgentRunStatus, string> = {
+    calling_tool: "正在调用工具",
+    completed: "已完成",
+    error: "出错",
+    generating: "正在生成回复",
+    idle: fallback,
+    thinking: "正在思考"
+  };
+
+  return labels[runStatus];
 }

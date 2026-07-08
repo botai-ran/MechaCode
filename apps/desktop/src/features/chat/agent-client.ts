@@ -16,6 +16,7 @@ type AgentChatRequest = {
 type AgentRunRequest = AgentChatRequest & {
   runId: string;
   messageId: string;
+  workspaceRoot: string;
 };
 
 type AgentChatResponse = {
@@ -25,6 +26,7 @@ type AgentChatResponse = {
 type AgentConfigResponse = {
   defaultProvider: RuntimeProviderId;
   availableProviders: RuntimeProviderId[];
+  defaultWorkspaceRoot: string;
 };
 
 export async function getAgentConfig(): Promise<AgentConfigResponse> {
@@ -52,11 +54,13 @@ export async function startAgentRun(options: {
   messages: ChatMessage[];
   runId: string;
   messageId: string;
+  workspaceRoot: string;
   onEvent: (event: AgentRunEvent) => void;
 }): Promise<void> {
   const request: AgentRunRequest = {
     runId: options.runId,
     messageId: options.messageId,
+    workspaceRoot: options.workspaceRoot,
     provider: options.provider,
     messages: toRuntimeMessages(options.messages)
   };
@@ -94,7 +98,7 @@ export async function startAgentRun(options: {
 
 function toRuntimeMessages(messages: ChatMessage[]): AgentChatRequest["messages"] {
   return messages
-    .filter((message) => !message.isSynthetic)
+    .filter((message) => !message.isSynthetic && message.content.trim().length > 0)
     .map((message) => ({
       role: message.role,
       content: message.content
