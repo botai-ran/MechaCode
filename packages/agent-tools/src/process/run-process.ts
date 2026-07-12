@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 
 import type { RunProcessOptions, RunProcessResult } from "../core/types.js";
+import { redactSecrets } from "../security/redaction.js";
+import { createSafeProcessEnv } from "./environment.js";
 
 /**
  * 启动子进程并收集标准输出与标准错误。
@@ -13,6 +15,7 @@ export function runProcess(
   return new Promise((resolve, reject) => {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
+      env: createSafeProcessEnv(),
       shell: false,
       windowsHide: true
     });
@@ -39,8 +42,8 @@ export function runProcess(
         exitCode,
         signal,
         timedOut,
-        stdout: stdout.text(),
-        stderr: stderr.text(),
+        stdout: redactSecrets(stdout.text()),
+        stderr: redactSecrets(stderr.text()),
         stdoutTruncated: stdout.truncated(),
         stderrTruncated: stderr.truncated()
       });

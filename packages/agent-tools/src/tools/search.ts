@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 
 import { ToolInputError } from "../core/errors.js";
+import { redactSecrets } from "../security/redaction.js";
 import type {
   AgentTool,
   SearchTextInput,
@@ -51,7 +52,7 @@ export function createSearchTextTool(
       const matches: SearchTextMatch[] = [];
       let truncated = false;
 
-      await walkTextFiles(target, async (filePath) => {
+      await walkTextFiles(context, target, async (filePath) => {
         if (matches.length >= maxResults) {
           truncated = true;
           return false;
@@ -73,7 +74,7 @@ export function createSearchTextTool(
               path: toWorkspacePath(context, filePath),
               line: index + 1,
               column: column + 1,
-              text: line
+              text: redactSecrets(line)
             });
           }
 

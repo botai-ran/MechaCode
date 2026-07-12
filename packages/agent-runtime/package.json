@@ -15,9 +15,11 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "pnpm run clean && tsc -p tsconfig.json",
     "chat": "tsx src/cli/index.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @mecha/protocol build && pnpm --filter @mecha/shared build && pnpm --filter @mecha/agent-tools build && pnpm run build && node --test dist/runtime/agent-run.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.0",
@@ -30,6 +32,6 @@
   "devDependencies": {
     "@types/node": "^26.1.0",
     "tsx": "^4.22.4",
-    "typescript": "^5.9.2"
+    "typescript": "5.9.3"
   }
 }

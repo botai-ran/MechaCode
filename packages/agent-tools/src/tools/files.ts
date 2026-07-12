@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { ToolInputError } from "../core/errors.js";
+import { isSensitiveWorkspacePath } from "../security/policy.js";
 import type {
   AgentTool,
   ListDirEntry,
@@ -15,11 +16,11 @@ import type {
   WriteFileOutput
 } from "../core/types.js";
 import { DEFAULT_READ_BYTES } from "../workspace/constants.js";
+import { redactSecrets } from "../security/redaction.js";
 import { getDirentType } from "../workspace/fs.js";
 import {
-  assertPathInsideWorkspace,
   resolveExistingWorkspacePath,
-  resolveWorkspacePath,
+  resolveWritableWorkspacePath,
   toWorkspacePath
 } from "../workspace/paths.js";
 import { assertPlainObject } from "../workspace/validation.js";
@@ -54,7 +55,7 @@ export function createReadFileTool(
 
       const buffer = await fs.readFile(target);
       const truncated = buffer.byteLength > maxBytes;
-      const content = buffer.subarray(0, maxBytes).toString(encoding);
+      const content = redactSecrets(buffer.subarray(0, maxBytes).toString(encoding));
 
       return {
         path: toWorkspacePath(context, target),
@@ -91,14 +92,9 @@ export function createWriteFileTool(
     async run(input) {
       assertPlainObject(input, "write_file input");
       const encoding = input.encoding ?? "utf8";
-      const target = resolveWorkspacePath(context, input.path);
-      const parent = path.dirname(target);
-
-      if (input.createParentDirs !== false) {
-        await fs.mkdir(parent, { recursive: true });
-      }
-
-      await assertPathInsideWorkspace(context, parent);
+      const target = await resolveWritableWorkspacePath(context, input.path, {
+        createParentDirs: input.createParentDirs !== false
+      });
       await fs.writeFile(target, input.content, { encoding });
       const buffer = Buffer.from(input.content, encoding);
 
@@ -136,10 +132,15 @@ export function createListDirTool(
 
       for (const entry of entries) {
         const absolutePath = path.join(target, entry.name);
+        const workspacePath = toWorkspacePath(context, absolutePath);
+        if (isSensitiveWorkspacePath(workspacePath)) {
+          continue;
+        }
+
         const stats = await fs.lstat(absolutePath);
         output.push({
           name: entry.name,
-          path: toWorkspacePath(context, absolutePath),
+          path: workspacePath,
           type: getDirentType(entry),
           sizeBytes: stats.size,
           modifiedAt: stats.mtime.toISOString()

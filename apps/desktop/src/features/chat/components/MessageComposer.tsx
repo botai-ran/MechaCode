@@ -1,3 +1,4 @@
+import { memo, useCallback } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
 type MessageComposerProps = {
@@ -10,7 +11,7 @@ type MessageComposerProps = {
   onSubmit: () => void;
 };
 
-export function MessageComposer({
+export const MessageComposer = memo(function MessageComposer({
   draft,
   errorMessage,
   isSending,
@@ -19,17 +20,27 @@ export function MessageComposer({
   onWorkspaceRootChange,
   onSubmit
 }: MessageComposerProps) {
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    onSubmit();
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+  const handleSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       onSubmit();
-    }
-  }
+    },
+    [onSubmit]
+  );
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey &&
+        !event.nativeEvent.isComposing
+      ) {
+        event.preventDefault();
+        onSubmit();
+      }
+    },
+    [onSubmit]
+  );
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
@@ -65,4 +76,4 @@ export function MessageComposer({
       </div>
     </form>
   );
-}
+});

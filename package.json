@@ -9,17 +9,21 @@
   },
   "scripts": {
     "dev": "pnpm --filter @mecha/desktop tauri dev",
-    "build": "pnpm --filter @mecha/desktop tauri build",
-    "check": "pnpm typecheck && pnpm lint",
-    "lint": "eslint .",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "clean": "pnpm -r --sort run clean",
+    "env:check": "node scripts/check-env.mjs",
+    "build:packages": "pnpm --filter @mecha/protocol build && pnpm --filter @mecha/shared build && pnpm --filter @mecha/agent-tools build && pnpm --filter @mecha/agent-runtime build",
+    "build": "pnpm env:check && pnpm build:packages && pnpm --filter @mecha/desktop build",
+    "build:tauri": "pnpm build:packages && pnpm --filter @mecha/desktop tauri build",
+    "check": "pnpm env:check && pnpm typecheck && pnpm lint",
+    "lint": "eslint . && node scripts/check-workspace-imports.mjs",
+    "typecheck": "pnpm build:packages && pnpm -r --sort run typecheck",
+    "test": "pnpm build:packages && pnpm -r --sort run test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.6.0",
     "globals": "^17.7.0",
-    "typescript": "^5.9.2",
+    "typescript": "5.9.3",
     "typescript-eslint": "^8.62.1"
   }
 }

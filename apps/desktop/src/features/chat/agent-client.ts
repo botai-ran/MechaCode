@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AgentRunEvent, ChatMessage, RuntimeProviderId } from "./types";
+import type {
+  AgentRunEvent,
+  ChatMessage,
+  RuntimeCapabilitySnapshot,
+  RuntimeProviderId
+} from "./types";
 
 const AGENT_RUN_EVENT = "agent-run-event";
 
@@ -27,6 +32,7 @@ type AgentConfigResponse = {
   defaultProvider: RuntimeProviderId;
   availableProviders: RuntimeProviderId[];
   defaultWorkspaceRoot: string;
+  securitySnapshot: RuntimeCapabilitySnapshot;
 };
 
 export async function getAgentConfig(): Promise<AgentConfigResponse> {

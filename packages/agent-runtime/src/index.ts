@@ -9,8 +9,11 @@ export type {
   AgentMessage,
   AgentRole,
   AgentRunEvent,
+  RuntimeCapabilitySnapshot,
+  RuntimeSecurityMode,
   RunEvent,
-  ToolCall
+  ToolCall,
+  ToolPolicyDecision
 } from "@mecha/protocol";
 export {
   AnthropicProvider,

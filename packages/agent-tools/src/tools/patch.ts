@@ -6,6 +6,7 @@ import type {
   WorkspaceToolContext
 } from "../core/types.js";
 import { runProcess } from "../process/run-process.js";
+import { resolveWorkspacePath } from "../workspace/paths.js";
 import { assertPlainObject } from "../workspace/validation.js";
 
 export function createApplyPatchTool(
@@ -34,6 +35,8 @@ export function createApplyPatchTool(
         throw new ToolInputError("apply_patch 的 patch 不能为空。");
       }
 
+      assertPatchPathsInsideWorkspace(context, input.patch);
+
       const args = ["apply", "--whitespace=nowarn"];
       if (input.checkOnly === true) {
         args.push("--check");
@@ -55,4 +58,41 @@ export function createApplyPatchTool(
       };
     }
   };
+}
+
+function assertPatchPathsInsideWorkspace(
+  context: WorkspaceToolContext,
+  patch: string
+): void {
+  for (const rawLine of patch.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    const candidate = readPatchPath(line);
+
+    if (!candidate || candidate === "/dev/null") {
+      continue;
+    }
+
+    resolveWorkspacePath(context, candidate);
+  }
+}
+
+function readPatchPath(line: string): string | null {
+  if (line.startsWith("+++ ") || line.startsWith("--- ")) {
+    return stripPatchPrefix(line.slice(4).split(/\t|\s/)[0] ?? "");
+  }
+
+  if (line.startsWith("diff --git ")) {
+    const parts = line.split(/\s+/);
+    return stripPatchPrefix(parts[2] ?? "");
+  }
+
+  return null;
+}
+
+function stripPatchPrefix(value: string): string {
+  if (value.startsWith("a/") || value.startsWith("b/")) {
+    return value.slice(2);
+  }
+
+  return value;
 }

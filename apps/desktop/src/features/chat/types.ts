@@ -1,4 +1,8 @@
-import type { AgentRunEvent, ToolPermissionCategory } from "@mecha/protocol";
+import type {
+  AgentRunEvent,
+  RuntimeCapabilitySnapshot,
+  ToolPermissionCategory
+} from "@mecha/protocol";
 
 /** 侧边栏中展示的一条会话摘要。 */
 export type Conversation = {
@@ -64,4 +68,8 @@ export type AgentRunStatus =
 
 export type RuntimeProviderId = "openai" | "anthropic";
 
-export type { AgentRunEvent, ToolPermissionCategory };
+export type {
+  AgentRunEvent,
+  RuntimeCapabilitySnapshot,
+  ToolPermissionCategory
+};

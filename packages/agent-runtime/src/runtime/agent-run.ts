@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentRunEvent } from "@mecha/protocol";
+import type { AgentRunEvent, RuntimeCapabilitySnapshot } from "@mecha/protocol";
 import type { AgentTool, ToolRegistry } from "@mecha/agent-tools";
 import type {
   ChatInput,
@@ -14,6 +14,17 @@ export type { AgentRunEvent } from "@mecha/protocol";
 /** runtime 默认允许模型连续发起的最大工具调用轮数。 */
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
 
+/** Runtime 侧 Run 快照的默认值，保持与 Tools 阶段 0 默认拒绝策略一致。 */
+const DEFAULT_SECURITY_SNAPSHOT: RuntimeCapabilitySnapshot = {
+  mode: "default_deny",
+  policyVersion: "default-deny-v0",
+  read: true,
+  write: false,
+  command: false,
+  network: false,
+  sensitiveFileProtection: true
+};
+
 /** 控制一次聊天运行时使用的可选标识与 ID 生成策略。 */
 export interface AgentRunChatOptions {
   /** 外部传入的运行 ID；用于把多段事件串到同一轮任务里。 */
@@ -24,6 +35,8 @@ export interface AgentRunChatOptions {
   createId?: () => string;
   /** 可选工具注册表；传入后 runtime 会把工具定义暴露给模型并执行工具调用。 */
   toolRegistry?: ToolRegistry;
+  /** 本轮运行使用的安全能力配置；Run 开始后会被冻结，不随外部设置变化提升权限。 */
+  securitySnapshot?: Partial<RuntimeCapabilitySnapshot>;
   /** 最大工具调用轮数；默认限制为 8 轮，避免模型陷入无限工具循环。 */
   maxToolRounds?: number;
 }
@@ -47,6 +60,12 @@ export async function* runAgentChat(
 ): AsyncIterable<AgentRunEvent> {
   const createId = options.createId ?? randomUUID;
   const runId = options.runId ?? createId();
+  const securitySnapshot = Object.freeze(
+    createRuntimeSecuritySnapshot({
+      ...options.securitySnapshot,
+      frozenAt: options.securitySnapshot?.frozenAt ?? new Date().toISOString()
+    })
+  );
   const tools = createChatTools(options.toolRegistry);
   const maxToolRounds = options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
   const messages = [...input.messages];
@@ -54,6 +73,7 @@ export async function* runAgentChat(
 
   // 先发出运行与消息开始事件，方便 UI 立即建立占位节点。
   yield { type: "run_start", runId };
+  yield { type: "security_snapshot", runId, snapshot: securitySnapshot };
 
   try {
     while (true) {
@@ -242,6 +262,15 @@ function toChatTool(tool: AgentTool): ChatTool {
       type: "object",
       properties: {}
     }
+  };
+}
+
+function createRuntimeSecuritySnapshot(
+  snapshot: Partial<RuntimeCapabilitySnapshot> = {}
+): RuntimeCapabilitySnapshot {
+  return {
+    ...DEFAULT_SECURITY_SNAPSHOT,
+    ...snapshot
   };
 }
 

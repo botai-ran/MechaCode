@@ -53,6 +53,19 @@ struct AgentConfigResponse {
     default_provider: String,
     available_providers: Vec<String>,
     default_workspace_root: String,
+    security_snapshot: RuntimeCapabilitySnapshot,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeCapabilitySnapshot {
+    mode: String,
+    policy_version: String,
+    read: bool,
+    write: bool,
+    command: bool,
+    network: bool,
+    sensitive_file_protection: bool,
 }
 
 #[tauri::command]
@@ -404,7 +417,20 @@ fn resolve_agent_config() -> Result<AgentConfigResponse, String> {
         default_provider,
         available_providers,
         default_workspace_root: root.to_string_lossy().to_string(),
+        security_snapshot: default_security_snapshot(),
     })
+}
+
+fn default_security_snapshot() -> RuntimeCapabilitySnapshot {
+    RuntimeCapabilitySnapshot {
+        mode: "default_deny".to_string(),
+        policy_version: "default-deny-v0".to_string(),
+        read: true,
+        write: false,
+        command: false,
+        network: false,
+        sensitive_file_protection: true,
+    }
 }
 
 fn has_config_value(env_content: &str, key: &str) -> bool {

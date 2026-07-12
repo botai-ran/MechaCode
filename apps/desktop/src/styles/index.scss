@@ -1,4 +1,9 @@
 @use "./tokens";
 @use "./base";
 @use "./layout";
+@use "./sidebar";
+@use "./message";
+@use "./tool-call";
+@use "./composer";
+@use "./skeleton";
 @use "./chat";

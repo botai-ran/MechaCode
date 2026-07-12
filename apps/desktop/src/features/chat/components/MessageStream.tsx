@@ -1,261 +1,103 @@
-import { useEffect, useRef } from "react";
-import type {
-  ChatMessage,
-  ToolCallStatus,
-  ToolCallView,
-  ToolPermissionCategory
-} from "../types";
+import { memo, useEffect, useRef, useState } from "react";
+import { List, useDynamicRowHeight, useListCallbackRef } from "react-window";
+import type { RowComponentProps } from "react-window";
+import type { ChatMessage } from "../types";
+import { MessageCard } from "./MessageCard";
 
 type MessageStreamProps = {
   messages: ChatMessage[];
   isSending: boolean;
 };
 
-export function MessageStream({ messages, isSending }: MessageStreamProps) {
-  const streamRef = useRef<HTMLDivElement>(null);
-  const visibleMessages = messages.filter((message) => message.role !== "system");
+type MessageRowProps = {
+  messages: ChatMessage[];
+  isSending: boolean;
+};
 
+export const MessageStream = memo(function MessageStream({
+  messages,
+  isSending
+}: MessageStreamProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerHeight, setContainerHeight] = useState(0);
+  const [listRef, setListRef] = useListCallbackRef();
+  const dynamicRowHeight = useDynamicRowHeight({ defaultRowHeight: 120 });
+
+  const visibleMessages = messages.filter((m) => m.role !== "system");
+
+  // Measure container height
   useEffect(() => {
-    const stream = streamRef.current;
+    const el = containerRef.current;
+    if (!el) return;
 
-    if (stream) {
-      stream.scrollTop = stream.scrollHeight;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height);
+      }
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    if (listRef && visibleMessages.length > 0) {
+      listRef.scrollToRow({
+        index: visibleMessages.length - 1,
+        align: "end",
+        behavior: "auto"
+      });
     }
-  }, [visibleMessages, isSending]);
+  }, [visibleMessages.length, listRef]);
+
+  // Fallback render when container height isn't measured yet
+  if (containerHeight === 0) {
+    return (
+      <div className="message-stream" ref={containerRef}>
+        {visibleMessages.map((message) => (
+          <MessageCard
+            key={message.id}
+            message={message}
+            isStreaming={false}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="message-stream" ref={streamRef}>
-      {visibleMessages.map((message) => (
-        <article
-          className={`message ${message.role}${
-            isSending && message.role === "assistant" && !message.content
-              ? " is-pending"
-              : ""
-          }`}
-          key={message.id}
-        >
-          <span className="message-role">
-            {message.role === "assistant" ? "助手" : "你"}
-          </span>
-          <div className="message-content">
-            {message.content ||
-              ((message.toolCalls?.length ?? 0) > 0
-                ? "正在整理工具结果..."
-                : "正在生成回复...")}
-          </div>
-          {message.toolCalls && message.toolCalls.length > 0 ? (
-            <div className="tool-call-list" aria-label="工具调用过程">
-              {message.toolCalls.map((toolCall) => (
-                <ToolCallCard key={toolCall.id} toolCall={toolCall} />
-              ))}
-            </div>
-          ) : null}
-        </article>
-      ))}
+    <div className="message-stream" ref={containerRef}>
+      <List
+        listRef={setListRef}
+        rowCount={visibleMessages.length}
+        rowHeight={dynamicRowHeight}
+        rowComponent={MessageRow}
+        rowProps={
+          { messages: visibleMessages, isSending } satisfies MessageRowProps
+        }
+        style={{ height: containerHeight, width: "100%" }}
+        overscanCount={3}
+      />
     </div>
   );
-}
+});
 
-function ToolCallCard({ toolCall }: { toolCall: ToolCallView }) {
+function MessageRow({
+  index,
+  style,
+  messages,
+  isSending
+}: RowComponentProps<MessageRowProps>) {
+  const message = messages[index];
+  const isLastAssistant =
+    isSending &&
+    message.role === "assistant" &&
+    index === messages.length - 1;
+
   return (
-    <section className={`tool-call is-${toolCall.status}`}>
-      <header className="tool-call-header">
-        <span className="tool-call-name">{toolCall.name}</span>
-        <span className="tool-call-badges">
-          <span className={`tool-call-permission is-${toolCall.permission}`}>
-            {getToolPermissionText(toolCall.permission)}
-          </span>
-          <span className="tool-call-status">
-            {getToolStatusText(toolCall.status)}
-          </span>
-        </span>
-      </header>
-      <p className="tool-call-summary">{summarizeToolInput(toolCall)}</p>
-      {toolCall.output !== undefined ? (
-        <p className="tool-call-result">{summarizeToolOutput(toolCall)}</p>
-      ) : null}
-    </section>
+    <div style={style}>
+      <MessageCard message={message} isStreaming={isLastAssistant} />
+    </div>
   );
-}
-
-function getToolPermissionText(permission: ToolPermissionCategory): string {
-  const labels: Record<ToolPermissionCategory, string> = {
-    command: "命令",
-    read: "只读",
-    write: "写入"
-  };
-
-  return labels[permission];
-}
-
-function getToolStatusText(status: ToolCallStatus): string {
-  const labels: Record<ToolCallStatus, string> = {
-    completed: "已完成",
-    failed: "失败",
-    running: "执行中"
-  };
-
-  return labels[status];
-}
-
-function summarizeToolInput(toolCall: ToolCallView): string {
-  const input = asRecord(toolCall.input);
-
-  if (toolCall.name === "read_file") {
-    return `读取文件 ${formatField(input.path)}${formatMaxBytes(input.maxBytes)}`;
-  }
-
-  if (toolCall.name === "list_dir") {
-    return `列出目录 ${formatField(input.path, ".")}`;
-  }
-
-  if (toolCall.name === "search_text") {
-    return `搜索 ${formatQuoted(input.query)}，范围 ${formatField(input.path, ".")}`;
-  }
-
-  if (toolCall.name === "run_command") {
-    return `执行命令 ${formatCommand(input.command, input.args)}`;
-  }
-
-  if (toolCall.name === "git_diff") {
-    const target = input.path ? `，路径 ${formatField(input.path)}` : "";
-    const staged = input.staged === true ? "暂存区" : "工作区";
-
-    return `读取 Git diff（${staged}${target}）`;
-  }
-
-  if (toolCall.name === "git_status") {
-    return "读取 Git 状态";
-  }
-
-  return `入参 ${formatUnknown(toolCall.input, 160)}`;
-}
-
-function summarizeToolOutput(toolCall: ToolCallView): string {
-  const output = asRecord(toolCall.output);
-
-  if (output.ok === false) {
-    return `工具失败：${formatField(output.error, "未知错误")}`;
-  }
-
-  const result = asRecord(output.result ?? toolCall.output);
-
-  if (toolCall.name === "read_file") {
-    const preview = formatPreview(result.content);
-    const suffix = result.truncated === true ? "，内容已截断" : "";
-
-    return `已读取 ${formatField(result.path)}，大小 ${formatBytes(result.sizeBytes)}${suffix}${preview}`;
-  }
-
-  if (toolCall.name === "list_dir") {
-    const entries = Array.isArray(result.entries) ? result.entries : [];
-    const names = entries
-      .slice(0, 5)
-      .map((entry) => formatField(asRecord(entry).name))
-      .join("、");
-    const suffix = entries.length > 5 ? " 等" : "";
-
-    return `共 ${entries.length} 项${names ? `：${names}${suffix}` : ""}`;
-  }
-
-  if (toolCall.name === "search_text") {
-    const matches = Array.isArray(result.matches) ? result.matches : [];
-    const firstMatch = asRecord(matches[0]);
-    const location = firstMatch.path
-      ? `，首个命中 ${formatField(firstMatch.path)}:${formatField(firstMatch.line)}`
-      : "";
-    const suffix = result.truncated === true ? "，结果已截断" : "";
-
-    return `找到 ${matches.length} 处匹配${location}${suffix}`;
-  }
-
-  if (toolCall.name === "run_command") {
-    const stdout = formatPreview(result.stdout, "stdout");
-    const stderr = formatPreview(result.stderr, "stderr");
-    const timedOut = result.timedOut === true ? "，已超时" : "";
-
-    return `退出码 ${formatField(result.exitCode, "无")}${timedOut}${stdout}${stderr}`;
-  }
-
-  if (toolCall.name === "git_diff") {
-    const stdout = String(result.stdout ?? "");
-    const stderr = formatPreview(result.stderr, "stderr");
-    const suffix = result.truncated === true ? "，输出已截断" : "";
-
-    return stdout.trim()
-      ? `diff 输出约 ${stdout.length} 字符${suffix}${stderr}`
-      : `没有 diff 输出${stderr}`;
-  }
-
-  if (toolCall.name === "git_status") {
-    const stdout = String(result.stdout ?? "").trim();
-    const stderr = formatPreview(result.stderr, "stderr");
-
-    return stdout ? `状态：${truncateText(stdout, 180)}${stderr}` : `工作区干净${stderr}`;
-  }
-
-  return `结果 ${formatUnknown(toolCall.output, 220)}`;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function formatField(value: unknown, fallback = "未指定"): string {
-  if (typeof value === "string" && value.length > 0) {
-    return value;
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-
-  return fallback;
-}
-
-function formatQuoted(value: unknown): string {
-  return `“${formatField(value)}”`;
-}
-
-function formatMaxBytes(value: unknown): string {
-  return typeof value === "number" ? `，最多 ${value} 字节` : "";
-}
-
-function formatBytes(value: unknown): string {
-  return typeof value === "number" ? `${value} 字节` : "未知";
-}
-
-function formatCommand(command: unknown, args: unknown): string {
-  const parts = [
-    formatField(command),
-    ...(Array.isArray(args) ? args.map((arg) => String(arg)) : [])
-  ];
-
-  return parts.join(" ");
-}
-
-function formatPreview(value: unknown, label = "预览"): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return "";
-  }
-
-  return `，${label}：${truncateText(value.trim(), 180)}`;
-}
-
-function formatUnknown(value: unknown, maxLength: number): string {
-  try {
-    return truncateText(JSON.stringify(value), maxLength);
-  } catch {
-    return truncateText(String(value), maxLength);
-  }
-}
-
-function truncateText(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-
-  return normalized.length > maxLength
-    ? `${normalized.slice(0, maxLength)}...`
-    : normalized;
 }

@@ -10,6 +10,7 @@ import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_MAX_SEARCH_RESULTS
 } from "./constants.js";
+import { createRuntimeSecuritySnapshot } from "../security/policy.js";
 
 /** 把外部配置标准化成运行时上下文。 */
 export function createContext(
@@ -21,6 +22,7 @@ export function createContext(
 
   return {
     workspaceRoot: path.resolve(options.workspaceRoot),
+    securitySnapshot: createRuntimeSecuritySnapshot(options.securitySnapshot),
     commandTimeoutMs: options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
     maxCommandOutputBytes:
       options.maxCommandOutputBytes ?? DEFAULT_COMMAND_OUTPUT_BYTES,

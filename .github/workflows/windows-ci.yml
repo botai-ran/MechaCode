@@ -1,0 +1,127 @@
+name: Windows CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+
+jobs:
+  windows-baseline:
+    name: Windows baseline
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Enable pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+
+      - name: Install dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Environment check
+        shell: pwsh
+        run: pnpm env:check
+
+      - name: pnpm check
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          pnpm check 2>&1 | Tee-Object -FilePath ci-logs/pnpm-check.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: pnpm build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          pnpm build 2>&1 | Tee-Object -FilePath ci-logs/pnpm-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: pnpm test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          pnpm test 2>&1 | Tee-Object -FilePath ci-logs/pnpm-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Rust tests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml 2>&1 | Tee-Object -FilePath ci-logs/cargo-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Redact failure logs
+        if: failure()
+        shell: pwsh
+        run: node scripts/redact-ci-logs.mjs ci-logs ci-logs-redacted
+
+      - name: Upload redacted failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-baseline-redacted-logs
+          path: ci-logs-redacted
+          if-no-files-found: ignore
+
+  clean-checkout:
+    name: Windows clean checkout without artifact cache
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+
+      - name: Enable pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+
+      - name: Install dependencies
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify from clean dist
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          pnpm clean 2>&1 | Tee-Object -FilePath ci-logs/pnpm-clean.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm check 2>&1 | Tee-Object -FilePath ci-logs/pnpm-check.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm build 2>&1 | Tee-Object -FilePath ci-logs/pnpm-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm test 2>&1 | Tee-Object -FilePath ci-logs/pnpm-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml 2>&1 | Tee-Object -FilePath ci-logs/cargo-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Redact failure logs
+        if: failure()
+        shell: pwsh
+        run: node scripts/redact-ci-logs.mjs ci-logs ci-logs-redacted
+
+      - name: Upload redacted failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-checkout-redacted-logs
+          path: ci-logs-redacted
+          if-no-files-found: ignore

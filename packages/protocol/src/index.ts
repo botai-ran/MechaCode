@@ -24,12 +24,53 @@ export interface ToolCall {
 }
 
 /** 工具调用的权限分类，用于 UI 标记风险等级和后续权限确认。 */
-export type ToolPermissionCategory = "command" | "read" | "write";
+export type ToolPermissionCategory = "command" | "network" | "read" | "write";
+
+/** 运行时安全模式，用于跨 UI、Tauri、Runtime 与 Tools 描述当前默认策略。 */
+export type RuntimeSecurityMode = "default_deny";
+
+/** 工具能力在一次 Run 开始时冻结后的只读快照。 */
+export interface RuntimeCapabilitySnapshot {
+  /** 当前安全模式；默认模式采用 fail closed，未声明能力一律视为关闭。 */
+  mode: RuntimeSecurityMode;
+  /** 策略版本，用于审计一次 Run 使用了哪一版默认拒绝规则。 */
+  policyVersion: string;
+  /** 是否允许读取工作区内非敏感内容；默认允许。 */
+  read: boolean;
+  /** 是否允许写入、patch 或修改 Git 工作区；默认拒绝。 */
+  write: boolean;
+  /** 是否允许执行本地命令或启动工具子进程；默认拒绝。 */
+  command: boolean;
+  /** 是否允许工具发起网络请求；默认拒绝。 */
+  network: boolean;
+  /** 是否启用敏感文件、密钥和凭据路径保护；默认启用。 */
+  sensitiveFileProtection: boolean;
+  /** 快照冻结时间，使用 ISO 字符串；缺省时表示调用方未记录时间。 */
+  frozenAt?: string;
+}
+
+/** 工具执行前策略复验的结果，供 Runtime 和 UI 展示一致的拒绝原因。 */
+export interface ToolPolicyDecision {
+  /** 决策结果；阶段 0 只实现允许与拒绝，审批留给后续 Tool Broker。 */
+  status: "allowed" | "denied";
+  /** 被评估的工具权限分类。 */
+  permission: ToolPermissionCategory;
+  /** 稳定错误码或审计码。 */
+  code: string;
+  /** 可直接展示给用户的中文原因。 */
+  message: string;
+}
 
 /** 一次 Agent run 过程中 runtime 对外抛出的标准事件。 */
 export type AgentRunEvent =
   /** 运行开始，`runId` 用于把后续事件归并到同一次执行。 */
   | { type: "run_start"; runId: string }
+  /** Run 开始时冻结的安全能力快照，运行中不随 UI 设置提升权限。 */
+  | {
+      type: "security_snapshot";
+      runId: string;
+      snapshot: RuntimeCapabilitySnapshot;
+    }
   /** runtime 开始向模型服务商发起请求。 */
   | { type: "model_request_start"; runId: string }
   /** assistant 消息开始生成，前端可据此创建空消息占位。 */

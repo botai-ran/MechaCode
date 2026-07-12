@@ -1,13 +1,34 @@
 import { createWorkspaceTools } from "../tools/index.js";
-import type { AgentTool, WorkspaceToolOptions } from "./types.js";
+import {
+  createPolicyGuardedTool,
+  createRuntimeSecuritySnapshot
+} from "../security/policy.js";
+import type {
+  AgentTool,
+  RuntimeCapabilitySnapshot,
+  WorkspaceToolOptions
+} from "./types.js";
 
 /** 以工具名为键的轻量注册表。 */
 export class ToolRegistry {
   private readonly tools = new Map<string, AgentTool>();
+  private readonly securitySnapshot: RuntimeCapabilitySnapshot;
+
+  /**
+   * 创建工具注册表。
+   *
+   * @param securitySnapshot 本注册表内所有工具执行时使用的冻结安全快照。
+   */
+  constructor(securitySnapshot?: Partial<RuntimeCapabilitySnapshot>) {
+    this.securitySnapshot = createRuntimeSecuritySnapshot(securitySnapshot);
+  }
 
   /** 注册或覆盖一个工具。 */
   register(tool: AgentTool): void {
-    this.tools.set(tool.name, tool);
+    this.tools.set(
+      tool.name,
+      createPolicyGuardedTool(tool, this.securitySnapshot)
+    );
   }
 
   /** 一次注册多个工具。 */
@@ -32,7 +53,7 @@ export class ToolRegistry {
 export function createDefaultToolRegistry(
   options: WorkspaceToolOptions
 ): ToolRegistry {
-  const registry = new ToolRegistry();
+  const registry = new ToolRegistry(options.securitySnapshot);
   registry.registerMany(createWorkspaceTools(options));
   return registry;
 }

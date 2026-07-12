@@ -1,6 +1,14 @@
-import type { ToolPermissionCategory } from "@mecha/protocol";
+import type {
+  RuntimeCapabilitySnapshot,
+  ToolPermissionCategory,
+  ToolPolicyDecision
+} from "@mecha/protocol";
 
-export type { ToolPermissionCategory };
+export type {
+  RuntimeCapabilitySnapshot,
+  ToolPermissionCategory,
+  ToolPolicyDecision
+};
 
 /** 面向 tool calling 暴露的 JSON Schema 结构。 */
 export type ToolInputSchema = Record<string, unknown>;
@@ -23,6 +31,8 @@ export interface AgentTool<I = unknown, O = unknown> {
 export interface WorkspaceToolOptions {
   /** 工具允许访问的工作区根目录。 */
   workspaceRoot: string;
+  /** 本轮工具执行使用的安全能力快照；未传入时采用默认拒绝策略。 */
+  securitySnapshot?: Partial<RuntimeCapabilitySnapshot>;
   /** 命令执行的默认超时时间，单位毫秒。 */
   commandTimeoutMs?: number;
   /** 单次命令输出允许保留的最大字节数。 */
@@ -35,6 +45,8 @@ export interface WorkspaceToolOptions {
 export interface WorkspaceToolContext {
   /** 规范化后的工作区根目录绝对路径。 */
   workspaceRoot: string;
+  /** 本轮工具执行时冻结的安全能力快照。 */
+  securitySnapshot: RuntimeCapabilitySnapshot;
   /** 命令执行超时时间。 */
   commandTimeoutMs: number;
   /** 命令输出允许保留的最大字节数。 */

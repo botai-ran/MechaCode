@@ -1,9 +1,12 @@
+import { memo } from "react";
 import { MessageComposer } from "./MessageComposer";
 import { MessageStream } from "./MessageStream";
+import { EmptyState } from "./EmptyState";
 import type {
   AgentRunStatus,
   ChatMessage,
   Conversation,
+  RuntimeCapabilitySnapshot,
   RuntimeProviderId
 } from "../types";
 
@@ -15,15 +18,17 @@ type ChatPanelProps = {
   isSending: boolean;
   runStatus: AgentRunStatus;
   workspaceRoot: string;
+  securitySnapshot: RuntimeCapabilitySnapshot;
   availableProviders: RuntimeProviderId[];
   provider: RuntimeProviderId;
   onDraftChange: (draft: string) => void;
   onWorkspaceRootChange: (workspaceRoot: string) => void;
   onProviderChange: (provider: RuntimeProviderId) => void;
   onSubmitMessage: () => void;
+  onNewConversation: () => void;
 };
 
-export function ChatPanel({
+export const ChatPanel = memo(function ChatPanel({
   conversation,
   messages,
   draft,
@@ -31,14 +36,17 @@ export function ChatPanel({
   isSending,
   runStatus,
   workspaceRoot,
+  securitySnapshot,
   availableProviders,
   provider,
   onDraftChange,
   onWorkspaceRootChange,
   onProviderChange,
-  onSubmitMessage
+  onSubmitMessage,
+  onNewConversation
 }: ChatPanelProps) {
   const statusText = getRunStatusText(runStatus, isSending, conversation.status);
+  const isEmpty = messages.length === 0 && !isSending && runStatus === "idle";
 
   return (
     <section className="chat-panel" aria-label="当前对话">
@@ -46,6 +54,9 @@ export function ChatPanel({
         <div className="chat-heading">
           <span className="chat-kicker">当前会话</span>
           <h1>{conversation.title}</h1>
+          <p className="security-summary">
+            {getSecuritySummary(securitySnapshot)}
+          </p>
         </div>
         <div className="chat-controls">
           <label className="provider-select">
@@ -81,7 +92,11 @@ export function ChatPanel({
         </div>
       </header>
 
-      <MessageStream messages={messages} isSending={isSending} />
+      {isEmpty ? (
+        <EmptyState onNewChat={onNewConversation} />
+      ) : (
+        <MessageStream messages={messages} isSending={isSending} />
+      )}
 
       <MessageComposer
         draft={draft}
@@ -94,7 +109,7 @@ export function ChatPanel({
       />
     </section>
   );
-}
+});
 
 function getRunStatusText(
   runStatus: AgentRunStatus,
@@ -115,4 +130,15 @@ function getRunStatusText(
   };
 
   return labels[runStatus];
+}
+
+function getSecuritySummary(snapshot: RuntimeCapabilitySnapshot): string {
+  const denied = [
+    !snapshot.write ? "写入默认拒绝" : null,
+    !snapshot.command ? "命令默认拒绝" : null,
+    !snapshot.network ? "网络默认拒绝" : null,
+    snapshot.sensitiveFileProtection ? "敏感文件保护开启" : null
+  ].filter(Boolean);
+
+  return `安全模式：默认拒绝；${denied.join("，")}`;
 }
