@@ -21,7 +21,9 @@ type ChatPanelProps = {
   securitySnapshot: RuntimeCapabilitySnapshot;
   availableProviders: RuntimeProviderId[];
   provider: RuntimeProviderId;
+  sidebarCollapsed: boolean;
   onDraftChange: (draft: string) => void;
+  onToggleSidebar: () => void;
   onWorkspaceRootChange: (workspaceRoot: string) => void;
   onProviderChange: (provider: RuntimeProviderId) => void;
   onSubmitMessage: () => void;
@@ -39,7 +41,9 @@ export const ChatPanel = memo(function ChatPanel({
   securitySnapshot,
   availableProviders,
   provider,
+  sidebarCollapsed,
   onDraftChange,
+  onToggleSidebar,
   onWorkspaceRootChange,
   onProviderChange,
   onSubmitMessage,
@@ -51,12 +55,43 @@ export const ChatPanel = memo(function ChatPanel({
   return (
     <section className="chat-panel" aria-label="当前对话">
       <header className="chat-header">
-        <div className="chat-heading">
-          <span className="chat-kicker">当前会话</span>
-          <h1>{conversation.title}</h1>
-          <p className="security-summary">
-            {getSecuritySummary(securitySnapshot)}
-          </p>
+        <div className="chat-header-left">
+          <button
+            className="sidebar-collapse-btn"
+            type="button"
+            onClick={onToggleSidebar}
+            aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {sidebarCollapsed ? (
+                <>
+                  <line x1="12" y1="3" x2="12" y2="13" />
+                  <polyline points="6,6 9,8 6,10" />
+                </>
+              ) : (
+                <>
+                  <line x1="4" y1="3" x2="4" y2="13" />
+                  <polyline points="10,6 7,8 10,10" />
+                </>
+              )}
+            </svg>
+          </button>
+          <div className="chat-heading">
+            <span className="chat-kicker">当前会话</span>
+            <h1>{conversation.title}</h1>
+            <p className="security-summary">
+              {getSecuritySummary(securitySnapshot)}
+            </p>
+          </div>
         </div>
         <div className="chat-controls">
           <label className="provider-select">

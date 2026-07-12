@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useChatStore, useActiveConversation, useConversationSummaries } from "./stores/chat-store";
 import { useAgentConfig } from "./hooks/useAgentConfig";
 import { useAgentRun } from "./hooks/useAgentRun";
@@ -10,6 +10,13 @@ function App() {
   // --- Init ---
   useAgentConfig();
   useKeyboardShortcuts();
+
+  // --- Sidebar collapse ---
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const toggleSidebar = useCallback(
+    () => setSidebarCollapsed((v) => !v),
+    []
+  );
 
   // --- Store state ---
   const activeConversationId = useChatStore((s) => s.activeConversationId);
@@ -67,7 +74,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <ConversationSidebar
         conversations={conversationSummaries}
         activeConversationId={activeConversationId}
@@ -87,7 +94,9 @@ function App() {
         securitySnapshot={securitySnapshot}
         availableProviders={availableProviders}
         provider={provider}
+        sidebarCollapsed={sidebarCollapsed}
         onDraftChange={setDraft}
+        onToggleSidebar={toggleSidebar}
         onWorkspaceRootChange={handleWorkspaceRootChange}
         onProviderChange={setProvider}
         onSubmitMessage={handleStartRun}

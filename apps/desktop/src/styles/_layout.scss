@@ -5,6 +5,7 @@
   grid-template-columns: minmax(248px, 284px) minmax(0, 1fr);
   overflow: hidden;
   background: var(--color-page);
+  transition: grid-template-columns 0.2s ease;
 }
 
 .conversation-sidebar {
@@ -15,6 +16,8 @@
   border-right: 1px solid var(--color-border-muted);
   background: var(--color-surface);
   padding: var(--space-4);
+  overflow: hidden;
+  transition: padding 0.2s ease, border-color 0.2s ease, width 0.2s ease;
 }
 
 .chat-panel {
@@ -42,4 +45,63 @@
   .chat-panel {
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
+}
+
+/* 桌面端侧边栏折叠 */
+@media (min-width: 761px) {
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 0 1fr;
+  }
+
+  .app-shell.sidebar-collapsed .conversation-sidebar {
+    padding: 0;
+    border-right-color: transparent;
+    width: 0;
+  }
+}
+
+/* 折叠/展开按钮 */
+.sidebar-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  color: var(--color-text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  svg {
+    display: block;
+  }
+}
+
+/* 桌面端显示折叠按钮 */
+@media (min-width: 761px) {
+  .sidebar-collapse-btn {
+    display: inline-flex;
+  }
+}
+
+/* 按钮在移动端隐藏（移动端由 sidebar-toggle 控制） */
+@media (max-width: 760px) {
+  .sidebar-collapse-btn {
+    display: none;
+  }
+}
+
+/* header 左侧区域：按钮 + 标题 */
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
