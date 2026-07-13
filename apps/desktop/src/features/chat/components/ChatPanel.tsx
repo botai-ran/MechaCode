@@ -27,6 +27,7 @@ type ChatPanelProps = {
   onWorkspaceRootChange: (workspaceRoot: string) => void;
   onProviderChange: (provider: RuntimeProviderId) => void;
   onSubmitMessage: () => void;
+  onCancelRun: () => void;
   onNewConversation: () => void;
 };
 
@@ -47,6 +48,7 @@ export const ChatPanel = memo(function ChatPanel({
   onWorkspaceRootChange,
   onProviderChange,
   onSubmitMessage,
+  onCancelRun,
   onNewConversation
 }: ChatPanelProps) {
   const statusText = getRunStatusText(runStatus, isSending, conversation.status);
@@ -138,9 +140,11 @@ export const ChatPanel = memo(function ChatPanel({
         errorMessage={errorMessage}
         isSending={isSending}
         workspaceRoot={workspaceRoot}
+        isCancelling={runStatus === "cancelling"}
         onDraftChange={onDraftChange}
         onWorkspaceRootChange={onWorkspaceRootChange}
         onSubmit={onSubmitMessage}
+        onCancel={onCancelRun}
       />
     </section>
   );
@@ -157,6 +161,8 @@ function getRunStatusText(
 
   const labels: Record<AgentRunStatus, string> = {
     calling_tool: "正在调用工具",
+    cancelled: "已取消",
+    cancelling: "正在取消",
     completed: "已完成",
     error: "出错",
     generating: "正在生成回复",

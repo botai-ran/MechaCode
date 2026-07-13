@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { AgentRunEvent, RuntimeCapabilitySnapshot } from "@mecha/protocol";
+import {
+  createRunStateMachine,
+  type AgentRunEvent,
+  type RuntimeCapabilitySnapshot,
+  type RunTerminalStatus
+} from "@mecha/protocol";
 import type { AgentTool, ToolRegistry } from "@mecha/agent-tools";
 import type {
   ChatInput,
@@ -39,6 +44,8 @@ export interface AgentRunChatOptions {
   securitySnapshot?: Partial<RuntimeCapabilitySnapshot>;
   /** 最大工具调用轮数；默认限制为 8 轮，避免模型陷入无限工具循环。 */
   maxToolRounds?: number;
+  /** Tauri sidecar 传入的取消信号；触发后 Runtime 应尽快产出唯一终态。 */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -58,6 +65,24 @@ export async function* runAgentChat(
   input: ChatInput,
   options: AgentRunChatOptions = {}
 ): AsyncIterable<AgentRunEvent> {
+  const machine = createRunStateMachine();
+
+  for await (const event of runAgentChatUnchecked(provider, input, options)) {
+    const result = machine.apply(event);
+
+    if (!result.ok) {
+      throw new Error(`Run 状态机拒绝 runtime 事件：${result.error.message}`);
+    }
+
+    yield event;
+  }
+}
+
+async function* runAgentChatUnchecked(
+  provider: ModelProvider,
+  input: ChatInput,
+  options: AgentRunChatOptions = {}
+): AsyncIterable<AgentRunEvent> {
   const createId = options.createId ?? randomUUID;
   const runId = options.runId ?? createId();
   const securitySnapshot = Object.freeze(
@@ -70,6 +95,7 @@ export async function* runAgentChat(
   const maxToolRounds = options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
   const messages = [...input.messages];
   let toolRounds = 0;
+  let terminalStatus: RunTerminalStatus = "completed";
 
   // 先发出运行与消息开始事件，方便 UI 立即建立占位节点。
   yield { type: "run_start", runId };
@@ -77,16 +103,20 @@ export async function* runAgentChat(
 
   try {
     while (true) {
+      throwIfAborted(options.abortSignal);
+
       const messageId =
         toolRounds === 0 && options.messageId ? options.messageId : createId();
       const output = yield* runModelTurn(provider, {
         ...input,
         messages,
-        tools: tools ?? input.tools
+        tools: tools ?? input.tools,
+        abortSignal: options.abortSignal
       }, {
         runId,
         messageId
       });
+      throwIfAborted(options.abortSignal);
 
       const toolCalls = output.toolCalls ?? [];
 
@@ -95,6 +125,7 @@ export async function* runAgentChat(
       }
 
       if (toolRounds >= maxToolRounds) {
+        terminalStatus = "failed";
         yield {
           type: "error",
           runId,
@@ -111,6 +142,8 @@ export async function* runAgentChat(
       });
 
       for (const toolCall of toolCalls) {
+        throwIfAborted(options.abortSignal);
+
         yield {
           type: "tool_call_start",
           runId,
@@ -121,6 +154,7 @@ export async function* runAgentChat(
         };
 
         const toolOutput = await runToolCall(options.toolRegistry, toolCall);
+        throwIfAborted(options.abortSignal);
 
         yield {
           type: "tool_result",
@@ -142,13 +176,18 @@ export async function* runAgentChat(
       }
     }
   } catch (error) {
-    yield {
-      type: "error",
-      runId,
-      message: getErrorMessage(error)
-    };
+    if (isAbortForSignal(error, options.abortSignal)) {
+      terminalStatus = getAbortTerminalStatus(options.abortSignal);
+    } else {
+      terminalStatus = "failed";
+      yield {
+        type: "error",
+        runId,
+        message: getErrorMessage(error)
+      };
+    }
   } finally {
-    yield { type: "run_done", runId };
+    yield { type: "run_done", runId, status: terminalStatus };
   }
 }
 
@@ -169,6 +208,7 @@ async function* runModelTurn(
   let content = "";
   let messageDone = false;
 
+  throwIfAborted(input.abortSignal);
   yield { type: "model_request_start", runId: context.runId };
   yield {
     type: "message_start",
@@ -178,6 +218,8 @@ async function* runModelTurn(
   };
 
   for await (const event of provider.streamChat(input)) {
+    throwIfAborted(input.abortSignal);
+
     if (event.type === "text_delta") {
       content += event.text;
       yield {
@@ -272,6 +314,29 @@ function createRuntimeSecuritySnapshot(
     ...DEFAULT_SECURITY_SNAPSHOT,
     ...snapshot
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw new RuntimeAbortError(signal.reason);
+}
+
+function isAbortForSignal(error: unknown, signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && error instanceof RuntimeAbortError;
+}
+
+function getAbortTerminalStatus(signal: AbortSignal | undefined): RunTerminalStatus {
+  return signal?.reason === "user" ? "cancelled" : "interrupted";
+}
+
+class RuntimeAbortError extends Error {
+  constructor(reason: unknown) {
+    super(`运行已取消：${String(reason ?? "unknown")}`);
+    this.name = "RuntimeAbortError";
+  }
 }
 
 async function runToolCall(

@@ -102,6 +102,14 @@ export async function startAgentRun(options: {
   });
 }
 
+export async function cancelAgentRun(runId: string): Promise<void> {
+  await invoke("cancel_agent_run", {
+    request: {
+      runId
+    }
+  });
+}
+
 function toRuntimeMessages(messages: ChatMessage[]): AgentChatRequest["messages"] {
   return messages
     .filter((message) => !message.isSynthetic && message.content.trim().length > 0)

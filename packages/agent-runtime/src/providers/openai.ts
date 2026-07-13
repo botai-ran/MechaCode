@@ -74,6 +74,8 @@ export class OpenAIProvider implements ModelProvider {
         tools: toOpenAIChatTools(input.tools),
         temperature: input.temperature,
         max_tokens: input.maxOutputTokens
+      }, {
+        signal: input.abortSignal
       });
       const message = response.choices[0]?.message;
 
@@ -97,6 +99,8 @@ export class OpenAIProvider implements ModelProvider {
       })),
       temperature: input.temperature,
       max_output_tokens: input.maxOutputTokens
+    }, {
+      signal: input.abortSignal
     });
 
     return {
@@ -125,6 +129,8 @@ export class OpenAIProvider implements ModelProvider {
         temperature: input.temperature,
         max_tokens: input.maxOutputTokens,
         stream: true
+      }, {
+        signal: input.abortSignal
       });
       const toolCallDeltas = new Map<
         number,
@@ -196,6 +202,8 @@ export class OpenAIProvider implements ModelProvider {
       })),
       temperature: input.temperature,
       max_output_tokens: input.maxOutputTokens
+    }, {
+      signal: input.abortSignal
     });
 
     /* 将 OpenAI 流式事件统一成运行时事件，避免桌面端感知服务商差异。 */

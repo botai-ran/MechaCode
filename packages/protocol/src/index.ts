@@ -1,3 +1,5 @@
+import type { RunTerminalStatus } from "./run-state.js";
+
 /** Agent 消息在 UI、Tauri 与 runtime 之间传递时允许使用的角色。 */
 export type AgentRole = "system" | "user" | "assistant" | "tool";
 
@@ -94,8 +96,77 @@ export type AgentRunEvent =
   | { type: "tool_result"; runId: string; toolCallId: string; output: unknown }
   /** 运行过程中发生的错误；有 `runId` 时可归并到对应 run。 */
   | { type: "error"; runId?: string; message: string }
-  /** 运行结束，无论成功或失败都会发送。 */
-  | { type: "run_done"; runId: string };
+  /** 运行结束，无论成功或失败都会发送；旧事件缺省时由状态机按是否见过 error 推断终态。 */
+  | { type: "run_done"; runId: string; status?: RunTerminalStatus };
 
 /** `AgentRunEvent` 的短别名，便于 UI 和 Tauri 层表达事件流。 */
 export type RunEvent = AgentRunEvent;
+
+export {
+  createProtocolEnvelopeV1,
+  decodeProtocolEnvelopeJsonV1,
+  decodeProtocolEnvelopeV1,
+  encodeProtocolEnvelopeJsonV1,
+  MAX_PROTOCOL_MESSAGE_BYTES,
+  PROTOCOL_MAJOR_VERSION_V1,
+  PROTOCOL_VERSION_V1,
+  PROTOCOL_V1_SCHEMA
+} from "./v1.js";
+export {
+  createSidecarHelloAckV1,
+  createSidecarHelloV1,
+  SIDECAR_CANCEL_GRACE_MS,
+  SIDECAR_HANDSHAKE_TIMEOUT_MS,
+  SIDECAR_MAX_FRAME_BYTES
+} from "./sidecar.js";
+export type {
+  AnyProtocolEnvelopeV1,
+  CreateProtocolEnvelopeInputV1,
+  DecodeProtocolJsonOptions,
+  ProtocolDecodeErrorV1,
+  ProtocolDecodeIgnoredV1,
+  ProtocolDecodeOkV1,
+  ProtocolDecodeResultV1,
+  ProtocolEnvelopeV1,
+  ProtocolErrorEnvelope,
+  ProtocolErrorPayloadV1,
+  ProtocolEventTypeV1,
+  ProtocolMessageDonePayloadV1,
+  ProtocolMessageSource,
+  ProtocolMessageStartPayloadV1,
+  ProtocolModelRequestStartPayloadV1,
+  ProtocolPayloadByTypeV1,
+  ProtocolRunDonePayloadV1,
+  ProtocolRunStartPayloadV1,
+  ProtocolSecuritySnapshotPayloadV1,
+  ProtocolTextDeltaPayloadV1,
+  ProtocolToolCallDonePayloadV1,
+  ProtocolToolCallStartPayloadV1,
+  ProtocolToolResultPayloadV1
+} from "./v1.js";
+export type {
+  CreateSidecarHelloInputV1,
+  SidecarChatMessageV1,
+  SidecarCancelReason,
+  SidecarCancelV1,
+  SidecarCapability,
+  SidecarControlMessageV1,
+  SidecarHelloAckV1,
+  SidecarHelloV1,
+  SidecarRunStartV1,
+  SidecarRuntimeMessageV1
+} from "./sidecar.js";
+export { RunStateMachine, createRunStateMachine } from "./run-state.js";
+export type {
+  CreateRunStateMachineOptions,
+  RunActiveState,
+  RunLifecycleState,
+  RunStateMachineError,
+  RunStateMachineErrorCode,
+  RunStateMachineFailure,
+  RunStateMachineOk,
+  RunStateMachineResult,
+  RunStateMachineSnapshot,
+  RunTerminalStatus,
+  RunToolCallState
+} from "./run-state.js";

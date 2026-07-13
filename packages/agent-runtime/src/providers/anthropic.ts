@@ -71,6 +71,8 @@ export class AnthropicProvider implements ModelProvider {
       temperature: input.temperature,
       tools: toAnthropicTools(input.tools),
       messages: toAnthropicMessages(input)
+    }, {
+      signal: input.abortSignal
     });
 
     return {
@@ -104,6 +106,8 @@ export class AnthropicProvider implements ModelProvider {
       temperature: input.temperature,
       tools: toAnthropicTools(input.tools),
       messages: toAnthropicMessages(input)
+    }, {
+      signal: input.abortSignal
     });
 
     /* Anthropic 的事件名称不同，这里统一折叠为所有适配器共享的文本和工具调用输出。 */

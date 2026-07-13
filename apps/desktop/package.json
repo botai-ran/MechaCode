@@ -9,7 +9,7 @@
     "build": "pnpm run clean && tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run typecheck && tsx --test src/stores/chat-store.test.ts",
+    "test": "pnpm run typecheck && tsx --test src/stores/chat-store.test.ts && cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -60,6 +60,8 @@ export type ToolCallView = {
 /** 当前 Agent run 在 UI 顶部展示的状态。 */
 export type AgentRunStatus =
   | "calling_tool"
+  | "cancelled"
+  | "cancelling"
   | "completed"
   | "error"
   | "generating"

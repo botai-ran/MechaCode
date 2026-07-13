@@ -1,0 +1,99 @@
+[
+  {
+    "name": "missing-run-id",
+    "expectedStatus": "error",
+    "expectedCode": "PROTOCOL_INVALID_RUN_ID",
+    "message": {
+      "protocolVersion": "1.0.0",
+      "seq": 1,
+      "type": "run_start",
+      "payload": {}
+    }
+  },
+  {
+    "name": "incompatible-major-version",
+    "expectedStatus": "error",
+    "expectedCode": "PROTOCOL_INCOMPATIBLE_VERSION",
+    "message": {
+      "protocolVersion": "2.0.0",
+      "runId": "run-incompatible",
+      "seq": 1,
+      "type": "run_start",
+      "payload": {}
+    }
+  },
+  {
+    "name": "unknown-event",
+    "expectedStatus": "ignored",
+    "expectedCode": "PROTOCOL_UNKNOWN_EVENT",
+    "message": {
+      "protocolVersion": "1.0.0",
+      "runId": "run-unknown",
+      "seq": 1,
+      "type": "future_event",
+      "payload": {}
+    }
+  },
+  {
+    "name": "invalid-tool-permission",
+    "expectedStatus": "error",
+    "expectedCode": "PROTOCOL_INVALID_TOOL_PERMISSION",
+    "message": {
+      "protocolVersion": "1.0.0",
+      "runId": "run-invalid",
+      "seq": 2,
+      "type": "tool_call_start",
+      "payload": {
+        "toolCallId": "tool-invalid",
+        "name": "command.run",
+        "permission": "admin",
+        "input": {}
+      }
+    }
+  },
+  {
+    "name": "missing-tool-input",
+    "expectedStatus": "error",
+    "expectedCode": "PROTOCOL_INVALID_TOOL_INPUT",
+    "message": {
+      "protocolVersion": "1.0.0",
+      "runId": "run-invalid",
+      "seq": 3,
+      "type": "tool_call_start",
+      "payload": {
+        "toolCallId": "tool-invalid",
+        "name": "command.run",
+        "permission": "command"
+      }
+    }
+  },
+  {
+    "name": "missing-terminal-status",
+    "expectedStatus": "error",
+    "expectedCode": "PROTOCOL_INVALID_TERMINAL_STATUS",
+    "message": {
+      "protocolVersion": "1.0.0",
+      "runId": "run-invalid",
+      "seq": 5,
+      "type": "run_done",
+      "payload": {}
+    }
+  },
+  {
+    "name": "invalid-error-source",
+    "expectedStatus": "error",
+    "expectedCode": "PROTOCOL_INVALID_ERROR_SOURCE",
+    "message": {
+      "protocolVersion": "1.0.0",
+      "runId": "run-invalid",
+      "seq": 4,
+      "type": "error",
+      "payload": {
+        "code": "RUNTIME_PROVIDER_ERROR",
+        "message": "模型服务请求失败。",
+        "retryable": false,
+        "source": "sdk"
+      }
+    }
+  }
+]

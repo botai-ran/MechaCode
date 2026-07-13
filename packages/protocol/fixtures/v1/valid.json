@@ -1,0 +1,122 @@
+[
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 0,
+    "type": "run_start",
+    "payload": {}
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 1,
+    "type": "security_snapshot",
+    "payload": {
+      "snapshot": {
+        "mode": "default_deny",
+        "policyVersion": "default-deny-v0",
+        "read": true,
+        "write": false,
+        "command": false,
+        "network": false,
+        "sensitiveFileProtection": true,
+        "frozenAt": "2026-07-13T00:00:00.000Z"
+      }
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 2,
+    "type": "model_request_start",
+    "payload": {}
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 3,
+    "type": "message_start",
+    "payload": {
+      "messageId": "message-fixture",
+      "role": "assistant"
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 4,
+    "type": "text_delta",
+    "payload": {
+      "messageId": "message-fixture",
+      "text": "你好"
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 5,
+    "type": "message_done",
+    "payload": {
+      "messageId": "message-fixture"
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 6,
+    "type": "tool_call_start",
+    "payload": {
+      "toolCallId": "tool-fixture",
+      "name": "file.read",
+      "permission": "read",
+      "input": {
+        "path": "README.md"
+      }
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 7,
+    "type": "tool_result",
+    "payload": {
+      "toolCallId": "tool-fixture",
+      "output": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 8,
+    "type": "tool_call_done",
+    "payload": {
+      "toolCallId": "tool-fixture"
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 9,
+    "type": "error",
+    "payload": {
+      "code": "RUNTIME_PROVIDER_ERROR",
+      "message": "模型服务请求失败。",
+      "retryable": true,
+      "source": "runtime",
+      "details": {
+        "provider": "openai"
+      }
+    }
+  },
+  {
+    "protocolVersion": "1.0.0",
+    "runId": "run-fixture",
+    "seq": 10,
+    "type": "run_done",
+    "payload": {
+      "status": "completed"
+    }
+  }
+]

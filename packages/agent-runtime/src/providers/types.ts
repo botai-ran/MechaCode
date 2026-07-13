@@ -48,6 +48,8 @@ export interface ChatInput {
   maxOutputTokens?: number;
   /** 本轮请求允许模型调用的工具列表。 */
   tools?: ChatTool[];
+  /** 调用方传入的取消信号；sidecar 取消、超时或应用退出时用于中断请求。 */
+  abortSignal?: AbortSignal;
 }
 
 /** 每个后端返回的统一聊天结果。 */

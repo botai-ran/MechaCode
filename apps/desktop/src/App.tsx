@@ -39,7 +39,7 @@ function App() {
   const conversationSummaries = useConversationSummaries();
 
   // --- Agent run ---
-  const { startRun, runStatus } = useAgentRun();
+  const { startRun, cancelRun, runStatus } = useAgentRun();
 
   // --- Handlers ---
   const handleStartRun = useCallback(() => {
@@ -100,6 +100,7 @@ function App() {
         onWorkspaceRootChange={handleWorkspaceRootChange}
         onProviderChange={setProvider}
         onSubmitMessage={handleStartRun}
+        onCancelRun={cancelRun}
         onNewConversation={handleNewConversation}
       />
     </main>

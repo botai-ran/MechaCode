@@ -6,9 +6,11 @@ type MessageComposerProps = {
   errorMessage: string | null;
   isSending: boolean;
   workspaceRoot: string;
+  isCancelling: boolean;
   onDraftChange: (draft: string) => void;
   onWorkspaceRootChange: (workspaceRoot: string) => void;
   onSubmit: () => void;
+  onCancel: () => void;
 };
 
 export const MessageComposer = memo(function MessageComposer({
@@ -16,9 +18,11 @@ export const MessageComposer = memo(function MessageComposer({
   errorMessage,
   isSending,
   workspaceRoot,
+  isCancelling,
   onDraftChange,
   onWorkspaceRootChange,
-  onSubmit
+  onSubmit,
+  onCancel
 }: MessageComposerProps) {
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -70,9 +74,15 @@ export const MessageComposer = memo(function MessageComposer({
       ) : null}
       <div className="composer-actions">
         <span className="composer-hint">Enter 发送，Shift + Enter 换行</span>
-        <button type="submit" disabled={isSending || !draft.trim()}>
-          {isSending ? "发送中" : "发送"}
-        </button>
+        {isSending ? (
+          <button type="button" disabled={isCancelling} onClick={onCancel}>
+            {isCancelling ? "正在取消" : "取消"}
+          </button>
+        ) : (
+          <button type="submit" disabled={!draft.trim()}>
+            发送
+          </button>
+        )}
       </div>
     </form>
   );

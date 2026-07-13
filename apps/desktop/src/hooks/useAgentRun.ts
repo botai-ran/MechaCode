@@ -1,7 +1,9 @@
-import { useCallback } from "react";
-import { startAgentRun } from "../features/chat/agent-client";
+import { useCallback, useRef } from "react";
+import { cancelAgentRun, startAgentRun } from "../features/chat/agent-client";
 import type { ChatMessage } from "../features/chat/types";
 import { useChatStore } from "../stores/chat-store";
+
+type FinalRunStatus = "completed" | "failed" | "cancelled" | "interrupted";
 
 function formatErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -15,6 +17,7 @@ export function useAgentRun() {
   const isSending = useChatStore((state) => state.isSending);
   const runStatus = useChatStore((state) => state.runStatus);
   const errorMessage = useChatStore((state) => state.errorMessage);
+  const activeRunIdRef = useRef<string | null>(null);
 
   const startRun = useCallback(async (draft: string) => {
     const state = useChatStore.getState();
@@ -53,6 +56,7 @@ export function useAgentRun() {
     };
 
     let runHadError = false;
+    let finalRunStatus: FinalRunStatus | null = null;
     let activeAssistantMessageId: string = assistantMessageId;
 
     // Optimistic update
@@ -78,6 +82,7 @@ export function useAgentRun() {
     useChatStore.getState().setErrorMessage(null);
     useChatStore.getState().setIsSending(true);
     useChatStore.getState().setRunStatus("thinking");
+    activeRunIdRef.current = runId;
 
     try {
       await startAgentRun({
@@ -172,6 +177,7 @@ export function useAgentRun() {
 
           if (event.type === "error") {
             runHadError = true;
+            finalRunStatus = "failed";
             s.setRunStatus("error");
             s.updateConversationStatus(runConversationId, "出错");
             s.setErrorMessage(formatErrorMessage(event.message));
@@ -179,17 +185,16 @@ export function useAgentRun() {
           }
 
           if (event.type === "run_done") {
-            s.setRunStatus(runHadError ? "error" : "completed");
-            s.updateConversationStatus(
-              runConversationId,
-              runHadError ? "出错" : "已完成"
-            );
+            finalRunStatus = event.status ?? (runHadError ? "failed" : "completed");
+            applyFinalRunStatus(s, runConversationId, finalRunStatus);
             s.setIsSending(false);
+            activeRunIdRef.current = null;
           }
         }
       });
     } catch (error) {
       runHadError = true;
+      finalRunStatus = "failed";
       useChatStore.getState().setRunStatus("error");
       useChatStore.getState().updateConversationStatus(
         runConversationId,
@@ -197,6 +202,9 @@ export function useAgentRun() {
       );
       useChatStore.getState().setErrorMessage(formatErrorMessage(error));
     } finally {
+      activeRunIdRef.current = null;
+      const resolvedFinalStatus = finalRunStatus ?? (runHadError ? "failed" : "completed");
+
       useChatStore.getState().updateConversationMessages(
         runConversationId,
         (msgs) =>
@@ -212,23 +220,78 @@ export function useAgentRun() {
               {
                 ...m,
                 isSynthetic: true as const,
-                content: runHadError
-                  ? "运行失败，未收到模型回复。"
-                  : "模型返回了空回复。"
+                content: getEmptyAssistantMessage(resolvedFinalStatus)
               }
             ];
           })
       );
       useChatStore.getState().setIsSending(false);
-      useChatStore.getState().setRunStatus(
-        runHadError ? "error" : "completed"
-      );
-      useChatStore.getState().updateConversationStatus(
-        runConversationId,
-        runHadError ? "出错" : "已完成"
-      );
+      applyFinalRunStatus(useChatStore.getState(), runConversationId, resolvedFinalStatus);
     }
   }, []);
 
-  return { startRun, isSending, runStatus, errorMessage };
+  const cancelRun = useCallback(async () => {
+    const runId = activeRunIdRef.current;
+
+    if (!runId) {
+      return;
+    }
+
+    const state = useChatStore.getState();
+    state.setRunStatus("cancelling");
+    state.setErrorMessage(null);
+
+    try {
+      await cancelAgentRun(runId);
+    } catch (error) {
+      state.setRunStatus("error");
+      state.setErrorMessage(formatErrorMessage(error));
+    }
+  }, []);
+
+  return { startRun, cancelRun, isSending, runStatus, errorMessage };
+}
+
+function applyFinalRunStatus(
+  state: ReturnType<typeof useChatStore.getState>,
+  conversationId: string,
+  status: FinalRunStatus
+): void {
+  if (status === "completed") {
+    state.setRunStatus("completed");
+    state.updateConversationStatus(conversationId, "已完成");
+    return;
+  }
+
+  if (status === "cancelled") {
+    state.setRunStatus("cancelled");
+    state.updateConversationStatus(conversationId, "已取消");
+    return;
+  }
+
+  if (status === "interrupted") {
+    state.setRunStatus("error");
+    state.updateConversationStatus(conversationId, "已中断");
+    state.setErrorMessage("错误：运行已中断。");
+    return;
+  }
+
+  state.setRunStatus("error");
+  state.updateConversationStatus(conversationId, "出错");
+}
+
+function getEmptyAssistantMessage(status: FinalRunStatus): string {
+  if (status === "cancelled") {
+    return "运行已取消。";
+  }
+
+  if (status === "interrupted") {
+    return "运行已中断，未收到模型回复。";
+  }
+
+  if (status === "failed") {
+    return "运行失败，未收到模型回复。";
+  }
+
+  return "模型返回了空回复。";
 }
