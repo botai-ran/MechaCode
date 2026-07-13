@@ -39,7 +39,7 @@ export type ChatMessage = {
 };
 
 /** 工具调用在 UI 中的执行状态。 */
-export type ToolCallStatus = "completed" | "failed" | "running";
+export type ToolCallStatus = "completed" | "failed" | "running" | "waiting_approval";
 
 /** 工具调用在消息流中的展示模型。 */
 export type ToolCallView = {
@@ -55,6 +55,10 @@ export type ToolCallView = {
   output?: unknown;
   /** 当前执行状态。 */
   status: ToolCallStatus;
+  /** 等待用户审批时的请求 ID。 */
+  approvalId?: string;
+  /** 触发审批的安全策略说明。 */
+  approvalReason?: string;
 };
 
 /** 当前 Agent run 在 UI 顶部展示的状态。 */

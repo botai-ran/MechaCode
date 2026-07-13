@@ -6,7 +6,9 @@ use tauri::{AppHandle, Manager, State, WindowEvent};
 mod protocol_v1;
 mod run_manager;
 
-use run_manager::{resolve_agent_config, AgentRunRequest, AgentRunStartedResponse, RunManager};
+use run_manager::{
+    resolve_agent_config, AgentRunRequest, AgentRunStartedResponse, RunManager, ToolApprovalRequest,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +70,14 @@ async fn cancel_agent_run(
     manager.cancel_run(&request.run_id)
 }
 
+#[tauri::command]
+async fn resolve_agent_tool_approval(
+    manager: State<'_, Arc<RunManager>>,
+    request: ToolApprovalRequest,
+) -> Result<(), String> {
+    manager.resolve_tool_approval(request)
+}
+
 pub(crate) fn default_security_snapshot() -> RuntimeCapabilitySnapshot {
     RuntimeCapabilitySnapshot {
         mode: "default_deny".to_string(),
@@ -91,7 +101,8 @@ pub fn run() {
             get_agent_config,
             run_agent_chat,
             start_agent_run,
-            cancel_agent_run
+            cancel_agent_run,
+            resolve_agent_tool_approval
         ])
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::CloseRequested { .. }) {

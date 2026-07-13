@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { ToolRegistry, type AgentTool } from "@mecha/agent-tools";
 import type { AgentRunEvent } from "@mecha/protocol";
 import { runAgentChat } from "./agent-run.js";
 import type {
@@ -28,6 +29,20 @@ const mockProvider: ModelProvider = {
         model: "mock-model",
         content: "ok"
       }
+    };
+  }
+};
+
+const toolCallingProvider: ModelProvider = {
+  id: "openai",
+  defaultModel: "mock-model",
+  async chat(input: ChatInput): Promise<ChatOutput> {
+    return createToolCallingOutput(input);
+  },
+  async *streamChat(input: ChatInput): AsyncIterable<ChatStreamEvent> {
+    yield {
+      type: "done",
+      output: createToolCallingOutput(input)
     };
   }
 };
@@ -133,6 +148,77 @@ test("Runtime 收到用户取消信号后以 cancelled 终态收口", async () =
   }
 });
 
+test("Runtime 在用户批准后执行被默认策略拒绝的工具", async () => {
+  let runCount = 0;
+  const registry = new ToolRegistry();
+  const tool: AgentTool<{ value: number }, { doubled: number }> = {
+    name: "dangerous_command",
+    description: "测试审批工具",
+    permission: "command",
+    async run(input) {
+      runCount += 1;
+      return { doubled: input.value * 2 };
+    }
+  };
+  const events: AgentRunEvent[] = [];
+
+  registry.register(tool);
+
+  for await (const event of runAgentChat(
+    toolCallingProvider,
+    {
+      messages: [{ role: "user", content: "run tool" }]
+    },
+    {
+      runId: "run-approval",
+      messageId: "message-approval",
+      createId: createSequentialId(),
+      toolRegistry: registry,
+      requestToolApproval: async (request) => {
+        assert.equal(request.runId, "run-approval");
+        assert.equal(request.toolCallId, "tool-call-approval");
+        assert.equal(request.name, "dangerous_command");
+        assert.equal(request.permission, "command");
+
+        return "approved";
+      }
+    }
+  )) {
+    events.push(event);
+  }
+
+  const approvalRequest = events.find(
+    (event) => event.type === "tool_approval_request"
+  );
+  const approvalResolved = events.find(
+    (event) => event.type === "tool_approval_resolved"
+  );
+  const toolResult = events.find((event) => event.type === "tool_result");
+  const doneEvent = events.at(-1);
+
+  assert.equal(runCount, 1);
+  assert.equal(approvalRequest?.type, "tool_approval_request");
+  assert.equal(approvalResolved?.type, "tool_approval_resolved");
+  assert.equal(toolResult?.type, "tool_result");
+
+  if (approvalResolved?.type === "tool_approval_resolved") {
+    assert.equal(approvalResolved.decision, "approved");
+  }
+
+  if (toolResult?.type === "tool_result") {
+    assert.deepEqual(toolResult.output, {
+      ok: true,
+      result: { doubled: 42 }
+    });
+  }
+
+  assert.equal(doneEvent?.type, "run_done");
+
+  if (doneEvent?.type === "run_done") {
+    assert.equal(doneEvent.status, "completed");
+  }
+});
+
 async function collectRunEvents(
   input: ChatInput,
   provider: ModelProvider = mockProvider
@@ -147,4 +233,35 @@ async function collectRunEvents(
   }
 
   return events;
+}
+
+function createToolCallingOutput(input: ChatInput): ChatOutput {
+  const hasToolResult = input.messages.some((message) => message.role === "tool");
+
+  if (hasToolResult) {
+    return {
+      provider: "openai",
+      model: "mock-model",
+      content: "done"
+    };
+  }
+
+  return {
+    provider: "openai",
+    model: "mock-model",
+    content: "",
+    toolCalls: [
+      {
+        id: "tool-call-approval",
+        name: "dangerous_command",
+        input: { value: 21 }
+      }
+    ]
+  };
+}
+
+function createSequentialId(): () => string {
+  let next = 0;
+
+  return () => `generated-${++next}`;
 }

@@ -1,5 +1,9 @@
 import { useCallback, useRef } from "react";
-import { cancelAgentRun, startAgentRun } from "../features/chat/agent-client";
+import {
+  cancelAgentRun,
+  resolveAgentToolApproval,
+  startAgentRun
+} from "../features/chat/agent-client";
 import type { ChatMessage } from "../features/chat/types";
 import { useChatStore } from "../stores/chat-store";
 
@@ -105,6 +109,18 @@ export function useAgentRun() {
           if (event.type === "message_start") {
             activeAssistantMessageId = event.messageId;
             s.setRunStatus("generating");
+            s.updateConversationMessages(runConversationId, (msgs) =>
+              msgs.some((m) => m.id === event.messageId)
+                ? msgs
+                : [
+                    ...msgs,
+                    {
+                      id: event.messageId,
+                      role: "assistant",
+                      content: ""
+                    }
+                  ]
+            );
           }
 
           if (event.type === "text_delta") {
@@ -136,6 +152,64 @@ export function useAgentRun() {
                     }
                   : m
               )
+            );
+          }
+
+          if (event.type === "tool_approval_request") {
+            s.setRunStatus("calling_tool");
+            s.updateConversationStatus(runConversationId, "等待审批");
+            s.updateConversationMessages(runConversationId, (msgs) =>
+              msgs.map((m) =>
+                m.id === activeAssistantMessageId
+                  ? {
+                      ...m,
+                      toolCalls: (m.toolCalls ?? []).some(
+                        (tc) => tc.id === event.toolCallId
+                      )
+                        ? (m.toolCalls ?? []).map((tc) =>
+                            tc.id === event.toolCallId
+                              ? {
+                                  ...tc,
+                                  approvalId: event.approvalId,
+                                  approvalReason: event.reason,
+                                  status: "waiting_approval" as const
+                                }
+                              : tc
+                          )
+                        : [
+                            ...(m.toolCalls ?? []),
+                            {
+                              id: event.toolCallId,
+                              name: event.name,
+                              permission: event.permission,
+                              input: event.input,
+                              approvalId: event.approvalId,
+                              approvalReason: event.reason,
+                              status: "waiting_approval" as const
+                            }
+                          ]
+                    }
+                  : m
+              )
+            );
+          }
+
+          if (event.type === "tool_approval_resolved") {
+            s.updateConversationMessages(runConversationId, (msgs) =>
+              msgs.map((m) => ({
+                ...m,
+                toolCalls: m.toolCalls?.map((tc) =>
+                  tc.id === event.toolCallId
+                    ? {
+                        ...tc,
+                        status:
+                          event.decision === "approved"
+                            ? ("running" as const)
+                            : ("failed" as const)
+                      }
+                    : tc
+                )
+              }))
             );
           }
 
@@ -207,8 +281,15 @@ export function useAgentRun() {
 
       useChatStore.getState().updateConversationMessages(
         runConversationId,
-        (msgs) =>
-          msgs.flatMap((m) => {
+        (msgs) => {
+          const hasLaterAssistantOutput = msgs.some(
+            (m) =>
+              m.id !== assistantMessageId &&
+              m.role === "assistant" &&
+              (m.content || (m.toolCalls?.length ?? 0) > 0)
+          );
+
+          return msgs.flatMap((m) => {
             if (
               m.id !== assistantMessageId ||
               m.content ||
@@ -216,6 +297,11 @@ export function useAgentRun() {
             ) {
               return [m];
             }
+
+            if (hasLaterAssistantOutput) {
+              return [];
+            }
+
             return [
               {
                 ...m,
@@ -223,7 +309,8 @@ export function useAgentRun() {
                 content: getEmptyAssistantMessage(resolvedFinalStatus)
               }
             ];
-          })
+          });
+        }
       );
       useChatStore.getState().setIsSending(false);
       applyFinalRunStatus(useChatStore.getState(), runConversationId, resolvedFinalStatus);
@@ -249,7 +336,29 @@ export function useAgentRun() {
     }
   }, []);
 
-  return { startRun, cancelRun, isSending, runStatus, errorMessage };
+  const approveToolCall = useCallback(
+    async (approvalId: string, toolCallId: string, approved: boolean) => {
+      const runId = activeRunIdRef.current;
+
+      if (!runId) {
+        return;
+      }
+
+      try {
+        await resolveAgentToolApproval({
+          runId,
+          approvalId,
+          toolCallId,
+          decision: approved ? "approved" : "denied"
+        });
+      } catch (error) {
+        useChatStore.getState().setErrorMessage(formatErrorMessage(error));
+      }
+    },
+    []
+  );
+
+  return { startRun, cancelRun, approveToolCall, isSending, runStatus, errorMessage };
 }
 
 function applyFinalRunStatus(

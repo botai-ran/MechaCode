@@ -7,16 +7,27 @@ import { MessageCard } from "./MessageCard";
 type MessageStreamProps = {
   messages: ChatMessage[];
   isSending: boolean;
+  onResolveToolApproval: (
+    approvalId: string,
+    toolCallId: string,
+    approved: boolean
+  ) => void;
 };
 
 type MessageRowProps = {
   messages: ChatMessage[];
   isSending: boolean;
+  onResolveToolApproval: (
+    approvalId: string,
+    toolCallId: string,
+    approved: boolean
+  ) => void;
 };
 
 export const MessageStream = memo(function MessageStream({
   messages,
-  isSending
+  isSending,
+  onResolveToolApproval
 }: MessageStreamProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -60,6 +71,7 @@ export const MessageStream = memo(function MessageStream({
             key={message.id}
             message={message}
             isStreaming={false}
+            onResolveToolApproval={onResolveToolApproval}
           />
         ))}
       </div>
@@ -74,7 +86,11 @@ export const MessageStream = memo(function MessageStream({
         rowHeight={dynamicRowHeight}
         rowComponent={MessageRow}
         rowProps={
-          { messages: visibleMessages, isSending } satisfies MessageRowProps
+          {
+            messages: visibleMessages,
+            isSending,
+            onResolveToolApproval
+          } satisfies MessageRowProps
         }
         style={{ height: containerHeight, width: "100%" }}
         overscanCount={3}
@@ -87,7 +103,8 @@ function MessageRow({
   index,
   style,
   messages,
-  isSending
+  isSending,
+  onResolveToolApproval
 }: RowComponentProps<MessageRowProps>) {
   const message = messages[index];
   const isLastAssistant =
@@ -97,7 +114,11 @@ function MessageRow({
 
   return (
     <div style={style}>
-      <MessageCard message={message} isStreaming={isLastAssistant} />
+      <MessageCard
+        message={message}
+        isStreaming={isLastAssistant}
+        onResolveToolApproval={onResolveToolApproval}
+      />
     </div>
   );
 }

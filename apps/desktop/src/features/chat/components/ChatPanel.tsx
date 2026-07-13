@@ -28,6 +28,11 @@ type ChatPanelProps = {
   onProviderChange: (provider: RuntimeProviderId) => void;
   onSubmitMessage: () => void;
   onCancelRun: () => void;
+  onResolveToolApproval: (
+    approvalId: string,
+    toolCallId: string,
+    approved: boolean
+  ) => void;
   onNewConversation: () => void;
 };
 
@@ -49,6 +54,7 @@ export const ChatPanel = memo(function ChatPanel({
   onProviderChange,
   onSubmitMessage,
   onCancelRun,
+  onResolveToolApproval,
   onNewConversation
 }: ChatPanelProps) {
   const statusText = getRunStatusText(runStatus, isSending, conversation.status);
@@ -132,7 +138,11 @@ export const ChatPanel = memo(function ChatPanel({
       {isEmpty ? (
         <EmptyState onNewChat={onNewConversation} />
       ) : (
-        <MessageStream messages={messages} isSending={isSending} />
+        <MessageStream
+          messages={messages}
+          isSending={isSending}
+          onResolveToolApproval={onResolveToolApproval}
+        />
       )}
 
       <MessageComposer

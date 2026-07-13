@@ -39,7 +39,7 @@ function App() {
   const conversationSummaries = useConversationSummaries();
 
   // --- Agent run ---
-  const { startRun, cancelRun, runStatus } = useAgentRun();
+  const { startRun, cancelRun, approveToolCall, runStatus } = useAgentRun();
 
   // --- Handlers ---
   const handleStartRun = useCallback(() => {
@@ -101,6 +101,7 @@ function App() {
         onProviderChange={setProvider}
         onSubmitMessage={handleStartRun}
         onCancelRun={cancelRun}
+        onResolveToolApproval={approveToolCall}
         onNewConversation={handleNewConversation}
       />
     </main>

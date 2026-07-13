@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { Readable } from "node:stream";
+import { config } from "dotenv";
 import { createDefaultToolRegistry } from "@mecha/agent-tools";
 import {
   createProtocolEnvelopeV1,
@@ -19,6 +22,7 @@ import {
   type SidecarRunStartV1
 } from "@mecha/protocol";
 import { ChatRuntime } from "../runtime/chat-runtime.js";
+import type { ToolApprovalRequest } from "../runtime/agent-run.js";
 
 /** Sidecar 入口的 Runtime 版本，发布构建可通过环境变量覆盖。 */
 const RUNTIME_VERSION =
@@ -30,6 +34,7 @@ let activeRun:
       runId: string;
       abortController: AbortController;
       cancelReason?: SidecarCancelReason;
+      pendingApprovals: Map<string, (decision: "approved" | "denied") => void>;
     }
   | undefined;
 
@@ -40,6 +45,8 @@ let activeRun:
  * 启动后先发送 hello，等待 hello_ack，再等待单个 run_start。
  */
 async function main(): Promise<void> {
+  loadEnv();
+
   const framed = new FramedJsonDuplex(Readable.toWeb(stdin) as ReadableStream<Uint8Array>);
 
   await framed.write(createSidecarHelloV1({
@@ -73,6 +80,11 @@ async function main(): Promise<void> {
 
     if (control.type === "cancel") {
       cancelActiveRun(control.runId, control.reason);
+      continue;
+    }
+
+    if (control.type === "tool_approval") {
+      resolveToolApproval(control);
     }
   }
 }
@@ -102,6 +114,11 @@ async function readControlMessagesUntilRunDone(
       continue;
     }
 
+    if (control.type === "tool_approval") {
+      resolveToolApproval(control);
+      continue;
+    }
+
     if (control.type === "run_start") {
       throw new Error("当前 sidecar 只允许单个 Run。");
     }
@@ -113,34 +130,54 @@ async function runAgent(
   request: SidecarRunStartV1
 ): Promise<void> {
   const abortController = new AbortController();
+  let seq = 0;
+  let terminalSent = false;
 
   activeRun = {
     runId: request.runId,
-    abortController
+    abortController,
+    pendingApprovals: new Map()
   };
 
-  const runtime = new ChatRuntime({
-    provider: request.provider,
-    model: request.model
-  });
-  const toolRegistry = request.useTools === false
-    ? undefined
-    : createDefaultToolRegistry({
-        workspaceRoot: request.workspaceRoot
-      });
-  let seq = 0;
-
   try {
+    const runtime = new ChatRuntime({
+      provider: request.provider,
+      model: request.model
+    });
+    const toolRegistry = request.useTools === false
+      ? undefined
+      : createDefaultToolRegistry({
+          workspaceRoot: request.workspaceRoot
+        });
+
     for await (const event of runtime.run(
       { messages: request.messages, model: request.model },
       {
         runId: request.runId,
         messageId: request.messageId,
         toolRegistry,
-        abortSignal: abortController.signal
+        abortSignal: abortController.signal,
+        requestToolApproval: (approvalRequest) =>
+          waitForToolApproval(approvalRequest, abortController.signal)
       }
     )) {
+      if (event.type === "run_done") {
+        terminalSent = true;
+      }
+
       await framed.write(toProtocolEnvelope(event, seq++));
+    }
+  } catch (error) {
+    if (!terminalSent) {
+      await framed.write(envelope(request.runId, seq++, "error", {
+        code: "RUNTIME_RUN_ERROR",
+        message: getErrorMessage(error),
+        retryable: false,
+        source: "runtime"
+      }));
+      await framed.write(envelope(request.runId, seq++, "run_done", {
+        status: "failed"
+      }));
     }
   } finally {
     activeRun = undefined;
@@ -154,6 +191,41 @@ function cancelActiveRun(runId: string, reason: SidecarCancelReason): void {
 
   activeRun.cancelReason = reason;
   activeRun.abortController.abort(reason);
+
+  for (const resolve of activeRun.pendingApprovals.values()) {
+    resolve("denied");
+  }
+  activeRun.pendingApprovals.clear();
+}
+
+function waitForToolApproval(
+  request: ToolApprovalRequest,
+  signal: AbortSignal
+): Promise<"approved" | "denied"> {
+  if (!activeRun || activeRun.runId !== request.runId || signal.aborted) {
+    return Promise.resolve("denied");
+  }
+
+  return new Promise((resolve) => {
+    activeRun?.pendingApprovals.set(request.approvalId, resolve);
+  });
+}
+
+function resolveToolApproval(
+  control: Extract<SidecarControlMessageV1, { type: "tool_approval" }>
+): void {
+  if (!activeRun || activeRun.runId !== control.runId) {
+    return;
+  }
+
+  const resolve = activeRun.pendingApprovals.get(control.approvalId);
+
+  if (!resolve) {
+    return;
+  }
+
+  activeRun.pendingApprovals.delete(control.approvalId);
+  resolve(control.decision);
 }
 
 function toProtocolEnvelope(
@@ -192,6 +264,21 @@ function toProtocolEnvelope(
         permission: event.permission,
         input: event.input
       });
+    case "tool_approval_request":
+      return envelope(runId, seq, "tool_approval_request", {
+        approvalId: event.approvalId,
+        toolCallId: event.toolCallId,
+        name: event.name,
+        permission: event.permission,
+        input: event.input,
+        reason: event.reason
+      });
+    case "tool_approval_resolved":
+      return envelope(runId, seq, "tool_approval_resolved", {
+        approvalId: event.approvalId,
+        toolCallId: event.toolCallId,
+        decision: event.decision
+      });
     case "tool_result":
       return envelope(runId, seq, "tool_result", {
         toolCallId: event.toolCallId,
@@ -227,6 +314,30 @@ function envelope<TType extends ProtocolEventTypeV1>(
     type,
     payload
   }) as AnyProtocolEnvelopeV1;
+}
+
+/**
+ * 按 Tauri 启动 sidecar 时的工作目录加载仓库 `.env`。
+ *
+ * 桌面端 Rust 层只负责读取 `.env` 判断 provider 可用；真正创建 provider 的
+ * Node sidecar 进程也必须加载同一份环境变量，否则会在收到 run_start 后初始化失败。
+ */
+function loadEnv(): void {
+  const candidates = [
+    resolve(process.cwd(), ".env"),
+    resolve(process.cwd(), "..", "..", ".env")
+  ];
+
+  for (const path of candidates) {
+    if (existsSync(path)) {
+      config({ path, quiet: true, override: true });
+      return;
+    }
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function readWithTimeout(
@@ -272,6 +383,32 @@ function decodeControlMessage(message: unknown): SidecarControlMessageV1 {
       type: "cancel",
       runId: message.runId,
       reason: message.reason
+    };
+  }
+
+  if (message.type === "tool_approval") {
+    if (!isNonEmptyString(message.runId)) {
+      throw new Error("tool_approval 消息缺少 runId。");
+    }
+
+    if (!isNonEmptyString(message.approvalId)) {
+      throw new Error("tool_approval 消息缺少 approvalId。");
+    }
+
+    if (!isNonEmptyString(message.toolCallId)) {
+      throw new Error("tool_approval 消息缺少 toolCallId。");
+    }
+
+    if (message.decision !== "approved" && message.decision !== "denied") {
+      throw new Error("tool_approval 消息缺少有效 decision。");
+    }
+
+    return {
+      type: "tool_approval",
+      runId: message.runId,
+      approvalId: message.approvalId,
+      toolCallId: message.toolCallId,
+      decision: message.decision
     };
   }
 

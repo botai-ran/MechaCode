@@ -113,6 +113,8 @@ fn validate_payload(
         "text_delta" => validate_text_delta_payload(payload),
         "message_done" => validate_string_field(payload, "messageId", "PROTOCOL_INVALID_MESSAGE_ID"),
         "tool_call_start" => validate_tool_call_start_payload(payload),
+        "tool_approval_request" => validate_tool_approval_request_payload(payload),
+        "tool_approval_resolved" => validate_tool_approval_resolved_payload(payload),
         "tool_call_done" => {
             validate_string_field(payload, "toolCallId", "PROTOCOL_INVALID_TOOL_CALL_ID")
         }
@@ -120,6 +122,46 @@ fn validate_payload(
         "error" => validate_error_payload(payload),
         _ => Some("PROTOCOL_UNKNOWN_EVENT"),
     }
+}
+
+fn validate_tool_approval_request_payload(
+    payload: &serde_json::Map<String, Value>,
+) -> Option<&'static str> {
+    if let Some(code) = validate_string_field(payload, "approvalId", "PROTOCOL_INVALID_APPROVAL_ID")
+    {
+        return Some(code);
+    }
+
+    if let Some(code) = validate_tool_call_start_payload(payload) {
+        return Some(code);
+    }
+
+    validate_string_field(payload, "reason", "PROTOCOL_INVALID_APPROVAL_REASON")
+}
+
+fn validate_tool_approval_resolved_payload(
+    payload: &serde_json::Map<String, Value>,
+) -> Option<&'static str> {
+    if let Some(code) = validate_string_field(payload, "approvalId", "PROTOCOL_INVALID_APPROVAL_ID")
+    {
+        return Some(code);
+    }
+
+    if let Some(code) =
+        validate_string_field(payload, "toolCallId", "PROTOCOL_INVALID_TOOL_CALL_ID")
+    {
+        return Some(code);
+    }
+
+    let Some(decision) = payload.get("decision").and_then(Value::as_str) else {
+        return Some("PROTOCOL_INVALID_APPROVAL_DECISION");
+    };
+
+    if !matches!(decision, "approved" | "denied") {
+        return Some("PROTOCOL_INVALID_APPROVAL_DECISION");
+    }
+
+    None
 }
 
 fn validate_run_done_payload(payload: &serde_json::Map<String, Value>) -> Option<&'static str> {
@@ -294,6 +336,8 @@ fn is_known_event_type(event_type: &str) -> bool {
             | "text_delta"
             | "message_done"
             | "tool_call_start"
+            | "tool_approval_request"
+            | "tool_approval_resolved"
             | "tool_call_done"
             | "tool_result"
             | "error"

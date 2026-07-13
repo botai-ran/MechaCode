@@ -1,4 +1,8 @@
-import type { RuntimeCapabilitySnapshot, ToolPermissionCategory } from "./index.js";
+import type {
+  RuntimeCapabilitySnapshot,
+  ToolApprovalDecision,
+  ToolPermissionCategory
+} from "./index.js";
 import type { RunTerminalStatus } from "./run-state.js";
 
 /** Protocol v1 当前生成消息时使用的具体版本号。 */
@@ -85,6 +89,32 @@ export interface ProtocolToolCallStartPayloadV1 {
   input: unknown;
 }
 
+/** 工具审批请求事件的 payload。 */
+export interface ProtocolToolApprovalRequestPayloadV1 {
+  /** 本次审批请求 ID，用于把 UI 决策回传到对应等待点。 */
+  approvalId: string;
+  /** 工具调用 ID，用于关联工具卡片和最终结果。 */
+  toolCallId: string;
+  /** 工具注册表中的稳定工具名称。 */
+  name: string;
+  /** 工具需要的权限分类。 */
+  permission: ToolPermissionCategory;
+  /** 模型生成的工具输入参数。 */
+  input: unknown;
+  /** 触发审批的安全策略说明。 */
+  reason: string;
+}
+
+/** 工具审批完成事件的 payload。 */
+export interface ProtocolToolApprovalResolvedPayloadV1 {
+  /** 已处理的审批请求 ID。 */
+  approvalId: string;
+  /** 对应工具调用 ID。 */
+  toolCallId: string;
+  /** 用户最终决策。 */
+  decision: ToolApprovalDecision;
+}
+
 /** 工具调用结束事件的 payload。 */
 export interface ProtocolToolCallDonePayloadV1 {
   /** 已收口的工具调用 ID。 */
@@ -124,6 +154,10 @@ export interface ProtocolPayloadByTypeV1 {
   message_done: ProtocolMessageDonePayloadV1;
   /** 模型请求执行工具。 */
   tool_call_start: ProtocolToolCallStartPayloadV1;
+  /** 工具执行前等待用户审批。 */
+  tool_approval_request: ProtocolToolApprovalRequestPayloadV1;
+  /** 工具审批已经被用户处理。 */
+  tool_approval_resolved: ProtocolToolApprovalResolvedPayloadV1;
   /** 工具调用执行阶段结束。 */
   tool_call_done: ProtocolToolCallDonePayloadV1;
   /** 工具调用返回结果。 */
@@ -221,6 +255,8 @@ export const PROTOCOL_V1_SCHEMA = Object.freeze({
     "text_delta",
     "message_done",
     "tool_call_start",
+    "tool_approval_request",
+    "tool_approval_resolved",
     "tool_call_done",
     "tool_result",
     "error",
@@ -413,6 +449,10 @@ function validatePayload(
       return validateStringField(payload, "messageId", "PROTOCOL_INVALID_MESSAGE_ID");
     case "tool_call_start":
       return validateToolCallStartPayload(payload);
+    case "tool_approval_request":
+      return validateToolApprovalRequestPayload(payload);
+    case "tool_approval_resolved":
+      return validateToolApprovalResolvedPayload(payload);
     case "tool_call_done":
       return validateStringField(payload, "toolCallId", "PROTOCOL_INVALID_TOOL_CALL_ID");
     case "tool_result":
@@ -420,6 +460,46 @@ function validatePayload(
     case "error":
       return validateProtocolErrorEnvelope(payload);
   }
+}
+
+function validateToolApprovalRequestPayload(
+  payload: Record<string, unknown>
+): ProtocolDecodeErrorV1 | null {
+  const approvalIdError = validateStringField(payload, "approvalId", "PROTOCOL_INVALID_APPROVAL_ID");
+
+  if (approvalIdError) {
+    return approvalIdError;
+  }
+
+  const toolCallError = validateToolCallStartPayload(payload);
+
+  if (toolCallError) {
+    return toolCallError;
+  }
+
+  return validateStringField(payload, "reason", "PROTOCOL_INVALID_APPROVAL_REASON");
+}
+
+function validateToolApprovalResolvedPayload(
+  payload: Record<string, unknown>
+): ProtocolDecodeErrorV1 | null {
+  const approvalIdError = validateStringField(payload, "approvalId", "PROTOCOL_INVALID_APPROVAL_ID");
+
+  if (approvalIdError) {
+    return approvalIdError;
+  }
+
+  const toolCallIdError = validateStringField(payload, "toolCallId", "PROTOCOL_INVALID_TOOL_CALL_ID");
+
+  if (toolCallIdError) {
+    return toolCallIdError;
+  }
+
+  if (payload.decision !== "approved" && payload.decision !== "denied") {
+    return protocolError("PROTOCOL_INVALID_APPROVAL_DECISION", "工具审批决策不在协议允许范围内。");
+  }
+
+  return null;
 }
 
 function validateRunDonePayload(

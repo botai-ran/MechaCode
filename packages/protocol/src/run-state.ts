@@ -127,6 +127,9 @@ export class RunStateMachine {
         return this.requireRunning(event);
       case "tool_call_start":
         return this.applyToolCallStart(event);
+      case "tool_approval_request":
+      case "tool_approval_resolved":
+        return this.requireRunning(event);
       case "tool_result":
         return this.applyToolResult(event);
       case "tool_call_done":

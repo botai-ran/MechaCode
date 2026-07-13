@@ -53,7 +53,7 @@ export interface RuntimeCapabilitySnapshot {
 
 /** 工具执行前策略复验的结果，供 Runtime 和 UI 展示一致的拒绝原因。 */
 export interface ToolPolicyDecision {
-  /** 决策结果；阶段 0 只实现允许与拒绝，审批留给后续 Tool Broker。 */
+  /** 决策结果；拒绝时 Runtime 可按权限类型进入用户审批流程。 */
   status: "allowed" | "denied";
   /** 被评估的工具权限分类。 */
   permission: ToolPermissionCategory;
@@ -62,6 +62,9 @@ export interface ToolPolicyDecision {
   /** 可直接展示给用户的中文原因。 */
   message: string;
 }
+
+/** 用户对单次工具调用审批后的决策。 */
+export type ToolApprovalDecision = "approved" | "denied";
 
 /** 一次 Agent run 过程中 runtime 对外抛出的标准事件。 */
 export type AgentRunEvent =
@@ -89,6 +92,25 @@ export type AgentRunEvent =
       name: string;
       permission: ToolPermissionCategory;
       input: unknown;
+    }
+  /** 工具调用命中默认拒绝策略，Runtime 正在等待用户批准或拒绝。 */
+  | {
+      type: "tool_approval_request";
+      runId: string;
+      approvalId: string;
+      toolCallId: string;
+      name: string;
+      permission: ToolPermissionCategory;
+      input: unknown;
+      reason: string;
+    }
+  /** 用户已经处理工具审批请求，Runtime 将继续执行或返回拒绝结果。 */
+  | {
+      type: "tool_approval_resolved";
+      runId: string;
+      approvalId: string;
+      toolCallId: string;
+      decision: ToolApprovalDecision;
     }
   /** 工具调用动作结束，表示工具执行阶段已收口。 */
   | { type: "tool_call_done"; runId: string; toolCallId: string }
@@ -140,6 +162,8 @@ export type {
   ProtocolRunStartPayloadV1,
   ProtocolSecuritySnapshotPayloadV1,
   ProtocolTextDeltaPayloadV1,
+  ProtocolToolApprovalRequestPayloadV1,
+  ProtocolToolApprovalResolvedPayloadV1,
   ProtocolToolCallDonePayloadV1,
   ProtocolToolCallStartPayloadV1,
   ProtocolToolResultPayloadV1
@@ -154,6 +178,7 @@ export type {
   SidecarHelloAckV1,
   SidecarHelloV1,
   SidecarRunStartV1,
+  SidecarToolApprovalV1,
   SidecarRuntimeMessageV1
 } from "./sidecar.js";
 export { RunStateMachine, createRunStateMachine } from "./run-state.js";

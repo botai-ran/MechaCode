@@ -3,9 +3,11 @@ import {
   createRunStateMachine,
   type AgentRunEvent,
   type RuntimeCapabilitySnapshot,
-  type RunTerminalStatus
+  type RunTerminalStatus,
+  type ToolApprovalDecision,
+  type ToolPermissionCategory
 } from "@mecha/protocol";
-import type { AgentTool, ToolRegistry } from "@mecha/agent-tools";
+import type { AgentTool, ToolPolicyDecision, ToolRegistry } from "@mecha/agent-tools";
 import type {
   ChatInput,
   ChatTool,
@@ -18,6 +20,24 @@ export type { AgentRunEvent } from "@mecha/protocol";
 
 /** runtime 默认允许模型连续发起的最大工具调用轮数。 */
 const DEFAULT_MAX_TOOL_ROUNDS = 8;
+
+/** Runtime 向外部 UI 请求单次工具审批时传递的上下文。 */
+export interface ToolApprovalRequest {
+  /** 本次 Run ID。 */
+  runId: string;
+  /** 审批请求 ID，用于把用户决策送回等待点。 */
+  approvalId: string;
+  /** 工具调用 ID。 */
+  toolCallId: string;
+  /** 工具名称。 */
+  name: string;
+  /** 工具权限分类。 */
+  permission: ToolPermissionCategory;
+  /** 工具输入。 */
+  input: unknown;
+  /** 安全策略给出的审批原因。 */
+  reason: string;
+}
 
 /** Runtime 侧 Run 快照的默认值，保持与 Tools 阶段 0 默认拒绝策略一致。 */
 const DEFAULT_SECURITY_SNAPSHOT: RuntimeCapabilitySnapshot = {
@@ -46,6 +66,8 @@ export interface AgentRunChatOptions {
   maxToolRounds?: number;
   /** Tauri sidecar 传入的取消信号；触发后 Runtime 应尽快产出唯一终态。 */
   abortSignal?: AbortSignal;
+  /** 工具调用被默认安全策略拒绝时，用于请求用户做单次审批。 */
+  requestToolApproval?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
 }
 
 /**
@@ -153,7 +175,11 @@ async function* runAgentChatUnchecked(
           input: toolCall.input
         };
 
-        const toolOutput = await runToolCall(options.toolRegistry, toolCall);
+        const toolOutput = yield* runToolCall(options.toolRegistry, toolCall, {
+          runId,
+          createId,
+          requestToolApproval: options.requestToolApproval
+        });
         throwIfAborted(options.abortSignal);
 
         yield {
@@ -339,10 +365,15 @@ class RuntimeAbortError extends Error {
   }
 }
 
-async function runToolCall(
+async function* runToolCall(
   registry: ToolRegistry,
-  toolCall: ChatToolCall
-): Promise<unknown> {
+  toolCall: ChatToolCall,
+  context: {
+    runId: string;
+    createId: () => string;
+    requestToolApproval?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
+  }
+): AsyncGenerator<AgentRunEvent, unknown, void> {
   const tool = registry.get(toolCall.name);
 
   if (!tool) {
@@ -352,10 +383,35 @@ async function runToolCall(
     };
   }
 
+  const decision = registry.evaluate(toolCall.name, toolCall.input);
+
+  if (decision?.status === "denied") {
+    const approved = yield* requestApprovalIfAllowed(registry, toolCall, decision, context);
+
+    if (!approved) {
+      return {
+        ok: false,
+        error: decision.message
+      };
+    }
+  }
+
+  const executableTool =
+    decision?.status === "denied"
+      ? registry.getApproved(toolCall.name)
+      : tool;
+
+  if (!executableTool) {
+    return {
+      ok: false,
+      error: `未找到可执行工具：${toolCall.name}`
+    };
+  }
+
   try {
     return {
       ok: true,
-      result: await tool.run(toolCall.input)
+      result: await executableTool.run(toolCall.input)
     };
   } catch (error) {
     return {
@@ -363,6 +419,55 @@ async function runToolCall(
       error: getErrorMessage(error)
     };
   }
+}
+
+async function* requestApprovalIfAllowed(
+  registry: ToolRegistry,
+  toolCall: ChatToolCall,
+  decision: ToolPolicyDecision,
+  context: {
+    runId: string;
+    createId: () => string;
+    requestToolApproval?: (request: ToolApprovalRequest) => Promise<ToolApprovalDecision>;
+  }
+): AsyncGenerator<AgentRunEvent, boolean, void> {
+  if (decision.code === "SENSITIVE_PATH_DENIED") {
+    return false;
+  }
+
+  const approvedTool = registry.getApproved(toolCall.name);
+
+  if (!context.requestToolApproval || !approvedTool) {
+    return false;
+  }
+
+  const approvalId = context.createId();
+  const request: ToolApprovalRequest = {
+    runId: context.runId,
+    approvalId,
+    toolCallId: toolCall.id,
+    name: toolCall.name,
+    permission: approvedTool.permission,
+    input: toolCall.input,
+    reason: decision.message
+  };
+
+  yield {
+    type: "tool_approval_request",
+    ...request
+  };
+
+  const approvalDecision = await context.requestToolApproval(request);
+
+  yield {
+    type: "tool_approval_resolved",
+    runId: context.runId,
+    approvalId,
+    toolCallId: toolCall.id,
+    decision: approvalDecision
+  };
+
+  return approvalDecision === "approved";
 }
 
 /**

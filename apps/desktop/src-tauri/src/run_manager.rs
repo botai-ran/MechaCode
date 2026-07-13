@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
 const AGENT_RUN_EVENT: &str = "agent-run-event";
+const AGENT_RUN_LOG_PREFIX: &str = "[AgentRun]";
 const SIDECAR_MAX_FRAME_BYTES: usize = 1024 * 1024;
 const SIDECAR_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const SIDECAR_CANCEL_GRACE: Duration = Duration::from_millis(1_500);
@@ -38,6 +39,15 @@ pub(crate) struct AgentChatMessage {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AgentRunStartedResponse {
     pub(crate) run_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolApprovalRequest {
+    pub(crate) run_id: String,
+    pub(crate) approval_id: String,
+    pub(crate) tool_call_id: String,
+    pub(crate) decision: String,
 }
 
 #[derive(Default)]
@@ -102,6 +112,12 @@ impl RunManager {
         let sidecar_command = resolve_sidecar_command(&root)?;
         let mut command = sidecar_command.command();
 
+        eprintln!(
+            "{AGENT_RUN_LOG_PREFIX} Tauri 收到 start_agent_run：runId={run_id}，provider={provider}，messageCount={}，workspaceRoot={}",
+            request.messages.len(),
+            workspace_root.display()
+        );
+
         command
             .current_dir(&root)
             .stdin(Stdio::piped())
@@ -111,6 +127,10 @@ impl RunManager {
         let mut child = command
             .spawn()
             .map_err(|error| format!("启动 Runtime sidecar 失败：{error}"))?;
+        eprintln!(
+            "{AGENT_RUN_LOG_PREFIX} Runtime sidecar 已启动：runId={run_id}，pid={}",
+            child.id()
+        );
         let stdin = child
             .stdin
             .take()
@@ -186,6 +206,25 @@ impl RunManager {
             .ok_or_else(|| "未找到可取消的 Run。".to_string())?;
 
         self.request_cancel(process, CancelReason::User)
+    }
+
+    pub(crate) fn resolve_tool_approval(&self, request: ToolApprovalRequest) -> Result<(), String> {
+        if !matches!(request.decision.as_str(), "approved" | "denied") {
+            return Err("工具审批决策必须是 approved 或 denied。".to_string());
+        }
+
+        let process = self
+            .get_run(&request.run_id)?
+            .ok_or_else(|| "未找到等待审批的 Run。".to_string())?;
+        let message = json!({
+            "type": "tool_approval",
+            "runId": request.run_id,
+            "approvalId": request.approval_id,
+            "toolCallId": request.tool_call_id,
+            "decision": request.decision
+        });
+
+        write_frame_locked(&process, &message)
     }
 
     pub(crate) fn shutdown_all(&self) {
@@ -294,6 +333,10 @@ fn drive_sidecar_run(
         .recv_timeout(SIDECAR_HANDSHAKE_TIMEOUT)
         .map_err(|_| "Runtime sidecar 握手超时。".to_string())??;
     validate_hello(&hello)?;
+    eprintln!(
+        "{AGENT_RUN_LOG_PREFIX} Runtime sidecar 握手成功：runId={}",
+        process.run_id
+    );
     write_frame_locked(
         &process,
         &json!({
@@ -303,6 +346,10 @@ fn drive_sidecar_run(
         }),
     )?;
     write_frame_locked(&process, &run_start)?;
+    eprintln!(
+        "{AGENT_RUN_LOG_PREFIX} 已向 Runtime sidecar 发送 run_start：runId={}",
+        process.run_id
+    );
 
     loop {
         match rx.recv() {
@@ -378,6 +425,7 @@ fn handle_runtime_frame(
             .and_then(Value::as_str)
             .unwrap_or("failed");
 
+        log_runtime_frame(event_type, run_id, &payload);
         manager.finish_run(app, run_id, status, None);
         return Ok(());
     }
@@ -385,6 +433,8 @@ fn handle_runtime_frame(
     if process.terminal_sent.load(Ordering::SeqCst) {
         return Ok(());
     }
+
+    log_runtime_frame(event_type, run_id, &payload);
 
     let event = protocol_payload_to_legacy_event(event_type, run_id, payload)?;
 
@@ -434,6 +484,23 @@ fn protocol_payload_to_legacy_event(
             "permission": payload.get("permission").and_then(Value::as_str).unwrap_or("command"),
             "input": payload.get("input").cloned().unwrap_or(Value::Null)
         })),
+        "tool_approval_request" => Ok(json!({
+            "type": "tool_approval_request",
+            "runId": run_id,
+            "approvalId": payload.get("approvalId").and_then(Value::as_str).unwrap_or_default(),
+            "toolCallId": payload.get("toolCallId").and_then(Value::as_str).unwrap_or_default(),
+            "name": payload.get("name").and_then(Value::as_str).unwrap_or_default(),
+            "permission": payload.get("permission").and_then(Value::as_str).unwrap_or("command"),
+            "input": payload.get("input").cloned().unwrap_or(Value::Null),
+            "reason": payload.get("reason").and_then(Value::as_str).unwrap_or_default()
+        })),
+        "tool_approval_resolved" => Ok(json!({
+            "type": "tool_approval_resolved",
+            "runId": run_id,
+            "approvalId": payload.get("approvalId").and_then(Value::as_str).unwrap_or_default(),
+            "toolCallId": payload.get("toolCallId").and_then(Value::as_str).unwrap_or_default(),
+            "decision": payload.get("decision").and_then(Value::as_str).unwrap_or("denied")
+        })),
         "tool_result" => Ok(json!({
             "type": "tool_result",
             "runId": run_id,
@@ -451,6 +518,91 @@ fn protocol_payload_to_legacy_event(
             "message": payload.get("message").and_then(Value::as_str).unwrap_or("Runtime sidecar 执行失败。")
         })),
         other => Err(format!("未知 Runtime sidecar 事件：{other}")),
+    }
+}
+
+fn log_runtime_frame(event_type: &str, run_id: &str, payload: &Value) {
+    match event_type {
+        "text_delta" => {
+            let message_id = payload
+                .get("messageId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let text = payload
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+
+            eprintln!(
+                "{AGENT_RUN_LOG_PREFIX} Tauri 收到 runtime 文本增量：runId={run_id}，messageId={message_id}，textChars={}，preview={}",
+                text.chars().count(),
+                truncate_log_text(text)
+            );
+        }
+        "message_start" | "message_done" => {
+            let message_id = payload
+                .get("messageId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+
+            eprintln!(
+                "{AGENT_RUN_LOG_PREFIX} Tauri 收到 runtime 消息事件：type={event_type}，runId={run_id}，messageId={message_id}"
+            );
+        }
+        "tool_call_start"
+        | "tool_approval_request"
+        | "tool_approval_resolved"
+        | "tool_result"
+        | "tool_call_done" => {
+            let tool_call_id = payload
+                .get("toolCallId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let name = payload
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+
+            eprintln!(
+                "{AGENT_RUN_LOG_PREFIX} Tauri 收到 runtime 工具事件：type={event_type}，runId={run_id}，toolCallId={tool_call_id}，name={name}"
+            );
+        }
+        "run_done" => {
+            let status = payload
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("failed");
+
+            eprintln!(
+                "{AGENT_RUN_LOG_PREFIX} Tauri 收到 runtime 终态：runId={run_id}，status={status}"
+            );
+        }
+        "error" => {
+            let message = payload
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Runtime sidecar 执行失败。");
+
+            eprintln!(
+                "{AGENT_RUN_LOG_PREFIX} Tauri 收到 runtime 错误：runId={run_id}，message={message}"
+            );
+        }
+        _ => {
+            eprintln!(
+                "{AGENT_RUN_LOG_PREFIX} Tauri 收到 runtime 事件：type={event_type}，runId={run_id}"
+            );
+        }
+    }
+}
+
+fn truncate_log_text(text: &str) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let preview: String = normalized.chars().take(80).collect();
+
+    if normalized.chars().count() > 80 {
+        format!("{preview}...")
+    } else {
+        preview
     }
 }
 

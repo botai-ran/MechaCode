@@ -3,11 +3,20 @@ import type { ToolCallView, ToolCallStatus, ToolPermissionCategory } from "../ty
 
 type ToolCallCardProps = {
   toolCall: ToolCallView;
+  onResolveApproval: (
+    approvalId: string,
+    toolCallId: string,
+    approved: boolean
+  ) => void;
 };
 
 export const ToolCallCard = memo(function ToolCallCard({
-  toolCall
+  toolCall,
+  onResolveApproval
 }: ToolCallCardProps) {
+  const isWaitingApproval =
+    toolCall.status === "waiting_approval" && toolCall.approvalId;
+
   return (
     <section className={`tool-call is-${toolCall.status}`}>
       <header className="tool-call-header">
@@ -22,6 +31,29 @@ export const ToolCallCard = memo(function ToolCallCard({
         </span>
       </header>
       <p className="tool-call-summary">{summarizeToolInput(toolCall)}</p>
+      {toolCall.approvalReason ? (
+        <p className="tool-call-result">{toolCall.approvalReason}</p>
+      ) : null}
+      {isWaitingApproval ? (
+        <div className="tool-call-actions">
+          <button
+            type="button"
+            onClick={() =>
+              onResolveApproval(toolCall.approvalId!, toolCall.id, true)
+            }
+          >
+            允许
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onResolveApproval(toolCall.approvalId!, toolCall.id, false)
+            }
+          >
+            拒绝
+          </button>
+        </div>
+      ) : null}
       {toolCall.output !== undefined ? (
         <p className="tool-call-result">{summarizeToolOutput(toolCall)}</p>
       ) : null}
@@ -43,7 +75,8 @@ function getToolStatusText(status: ToolCallStatus): string {
   const labels: Record<ToolCallStatus, string> = {
     completed: "已完成",
     failed: "失败",
-    running: "执行中"
+    running: "执行中",
+    waiting_approval: "等待审批"
   };
   return labels[status];
 }

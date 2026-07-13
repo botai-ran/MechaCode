@@ -3,6 +3,7 @@ import {
   PROTOCOL_VERSION_V1,
   type AnyProtocolEnvelopeV1
 } from "./v1.js";
+import type { ToolApprovalDecision } from "./index.js";
 
 /** Sidecar IPC 使用的最大单帧字节数，Tauri 与 Runtime 握手时必须声明同一量级上限。 */
 export const SIDECAR_MAX_FRAME_BYTES = MAX_PROTOCOL_MESSAGE_BYTES;
@@ -18,7 +19,8 @@ export type SidecarCapability =
   | "framed_ipc"
   | "protocol_v1"
   | "single_run"
-  | "cooperative_cancel";
+  | "cooperative_cancel"
+  | "tool_approval";
 
 /** Tauri 请求取消 Run 时使用的稳定原因。 */
 export type SidecarCancelReason = "user" | "timeout" | "app_exit";
@@ -87,11 +89,26 @@ export interface SidecarCancelV1 {
   reason: SidecarCancelReason;
 }
 
+/** Tauri 将用户对某次工具调用的审批结果回传给 sidecar。 */
+export interface SidecarToolApprovalV1 {
+  /** 消息类型，固定为 `tool_approval`。 */
+  type: "tool_approval";
+  /** 当前 Run ID，用于防止跨 Run 误投递。 */
+  runId: string;
+  /** Runtime 生成的审批请求 ID。 */
+  approvalId: string;
+  /** 被审批的工具调用 ID。 */
+  toolCallId: string;
+  /** 用户审批结果。 */
+  decision: ToolApprovalDecision;
+}
+
 /** Tauri 发送给 Runtime sidecar 的控制消息。 */
 export type SidecarControlMessageV1 =
   | SidecarHelloAckV1
   | SidecarRunStartV1
-  | SidecarCancelV1;
+  | SidecarCancelV1
+  | SidecarToolApprovalV1;
 
 /** Runtime sidecar 发送给 Tauri 的所有消息。 */
 export type SidecarRuntimeMessageV1 = SidecarHelloV1 | AnyProtocolEnvelopeV1;
@@ -124,7 +141,8 @@ export function createSidecarHelloV1(
       "framed_ipc",
       "protocol_v1",
       "single_run",
-      "cooperative_cancel"
+      "cooperative_cancel",
+      "tool_approval"
     ],
     maxFrameBytes: input.maxFrameBytes ?? SIDECAR_MAX_FRAME_BYTES
   };

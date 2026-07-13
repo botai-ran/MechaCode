@@ -110,6 +110,33 @@ function isFailedToolOutput(output: unknown): boolean {
   );
 }
 
+function appendTextDeltaToConversation(
+  conversation: ConversationState,
+  messageId: string,
+  text: string
+): ConversationState {
+  const hasTargetMessage = conversation.messages.some((m) => m.id === messageId);
+
+  return {
+    ...conversation,
+    status: "生成中",
+    messages: hasTargetMessage
+      ? conversation.messages.map((m) =>
+          m.id === messageId
+            ? { ...m, content: m.content + text }
+            : m
+        )
+      : [
+          ...conversation.messages,
+          {
+            id: messageId,
+            role: "assistant",
+            content: text
+          }
+        ]
+  };
+}
+
 // --------------- Store ---------------
 
 export const useChatStore = create<ChatState & ChatActions>()((set) => ({
@@ -193,15 +220,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set) => ({
       runStatus: "generating" as AgentRunStatus,
       conversations: state.conversations.map((c) =>
         c.id === conversationId
-          ? {
-              ...c,
-              status: "生成中",
-              messages: c.messages.map((m) =>
-                m.id === messageId
-                  ? { ...m, content: m.content + text }
-                  : m
-              )
-            }
+          ? appendTextDeltaToConversation(c, messageId, text)
           : c
       )
     })),

@@ -95,7 +95,8 @@ test("Sidecar v1 握手消息使用 Protocol v1 和有界帧", () => {
     "framed_ipc",
     "protocol_v1",
     "single_run",
-    "cooperative_cancel"
+    "cooperative_cancel",
+    "tool_approval"
   ]);
   assert.deepEqual(ack, {
     type: "hello_ack",

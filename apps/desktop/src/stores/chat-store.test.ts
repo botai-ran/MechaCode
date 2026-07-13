@@ -57,6 +57,18 @@ test("chat store 可以合并文本增量并标记工具失败", () => {
   assert.equal(toolCall?.status, "failed");
 });
 
+test("chat store 在文本增量缺少目标消息时会补齐 assistant 消息", () => {
+  resetStore();
+
+  useChatStore.getState().processTextDelta("current", "assistant-late", "迟到的回复");
+
+  const [message] = useChatStore.getState().conversations[0]?.messages ?? [];
+
+  assert.equal(message?.id, "assistant-late");
+  assert.equal(message?.role, "assistant");
+  assert.equal(message?.content, "迟到的回复");
+});
+
 test("chat store 默认安全快照保持默认拒绝", () => {
   resetStore();
   const snapshot = useChatStore.getState().securitySnapshot;

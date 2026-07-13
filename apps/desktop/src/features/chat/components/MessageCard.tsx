@@ -6,11 +6,17 @@ import { ToolCallCard } from "./ToolCallCard";
 type MessageCardProps = {
   message: ChatMessage;
   isStreaming?: boolean;
+  onResolveToolApproval: (
+    approvalId: string,
+    toolCallId: string,
+    approved: boolean
+  ) => void;
 };
 
 export const MessageCard = memo(function MessageCard({
   message,
-  isStreaming
+  isStreaming,
+  onResolveToolApproval
 }: MessageCardProps) {
   const parsedContent = useMemo(
     () => renderContent(message.content),
@@ -35,7 +41,11 @@ export const MessageCard = memo(function MessageCard({
       {message.toolCalls && message.toolCalls.length > 0 ? (
         <div className="tool-call-list" aria-label="工具调用过程">
           {message.toolCalls.map((tc) => (
-            <ToolCallCard key={tc.id} toolCall={tc} />
+            <ToolCallCard
+              key={tc.id}
+              toolCall={tc}
+              onResolveApproval={onResolveToolApproval}
+            />
           ))}
         </div>
       ) : null}
